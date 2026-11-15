@@ -7,7 +7,7 @@ assert.deepEqual(Object.keys(ui.requests).sort(),["status.get","catalog.page","l
 assert.deepEqual(Object.keys(ui.subscriptions),["external-gateway.status.watch"]);
 for(const request of [...Object.values(ui.requests),...Object.values(ui.subscriptions)])assert.equal(request.request.additionalProperties,false);
 const manifest=JSON.parse(read("../teamarness.package.json"));
-assert.deepEqual(manifest.capabilities,[{identity:"teamarness.workspace-context",major:1,minMinor:0,maxMinor:0},{identity:"teamarness.package-ports",major:3,minMinor:0,maxMinor:0}]);
+assert.deepEqual(manifest.capabilities,[{identity:"teamarness.workspace-context",major:1,minMinor:0,maxMinor:0},{identity:"teamarness.package-ports",major:3,minMinor:0,maxMinor:0},{identity:"teamarness.membership",major:1,minMinor:0,maxMinor:0}]);
 assert.deepEqual(manifest.ui.views,["settings"]);
 assert.equal(manifest.consumedPorts,undefined);assert.equal(manifest.providedPorts,undefined);assert.equal(manifest.activation,undefined);
 const limits=JSON.parse(read("../contracts/http-v1.schema.json"))["x-limits"];

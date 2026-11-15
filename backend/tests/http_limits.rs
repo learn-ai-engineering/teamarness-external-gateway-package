@@ -273,6 +273,8 @@ async fn metadata_document_limit_is_exact_and_never_truncated() {
         let d = tempfile::tempdir().unwrap();
         let mut h = HarnessBuilder::new(router().into_backend())
             .data_directory(d.path().canonicalize().unwrap())
+            .installation(&"b".repeat(64), "Local")
+            .capability("teamarness.membership", membership_support::present())
             .capability_version("teamarness.package-ports", script, 3, 0)
             .start()
             .await;
@@ -319,6 +321,8 @@ async fn summary_page_byte_budget_accepts_32768_and_refuses_32769() {
         let d = tempfile::tempdir().unwrap();
         let mut h = HarnessBuilder::new(router().into_backend())
             .data_directory(d.path().canonicalize().unwrap())
+            .installation(&"b".repeat(64), "Local")
+            .capability("teamarness.membership", membership_support::present())
             .capability_version("teamarness.package-ports", script, 3, 0)
             .start()
             .await;

@@ -48,6 +48,15 @@ describe("External Gateway main/settings mount", () => {
     client.terminate("external-gateway.status.watch", createPackageRequestError({ packageError: { code: "external_gateway.unavailable" } }));
     expect(root.textContent).toContain("external_gateway.unavailable");
   });
+  it("distinguishes membership removal from monitoring failure without publishing a stopped URL", async () => {
+    const client = fake(); const root = setup(client); await flush();
+    await client.emit("external-gateway.status.watch", { ...status, desiredEnabled: true, port: 32123, warning: "membership_removed" });
+    expect(root.textContent).toContain("This Installation is no longer a Workspace member");
+    expect(root.textContent).not.toContain("http://127.0.0.1:32123/v1");
+    await client.emit("external-gateway.status.watch", { ...status, desiredEnabled: true, port: 32123, warning: "membership_unavailable" });
+    expect(root.textContent).toContain("Membership monitoring is unavailable");
+    expect(root.textContent).not.toContain("This Installation is no longer a Workspace member");
+  });
   it("reports initial failure and aborts work, closes late subscriptions and unmounts idempotently", async () => {
     const client = fake({ "external-gateway.status.get": () => { throw createPackageRequestError({ packageError: { code: "external_gateway.storage_failed" } }); } });
     const root = setup(client); await flush(); expect(root.textContent).toContain("external_gateway.storage_failed");

@@ -46,6 +46,12 @@
       "major": 3,
       "minMinor": 0,
       "maxMinor": 0
+    },
+    {
+      "identity": "teamarness.membership",
+      "major": 1,
+      "minMinor": 0,
+      "maxMinor": 0
     }
   ]
 }

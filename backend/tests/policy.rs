@@ -1,4 +1,5 @@
 //! Verifies: TEAM.SYS.PKG-R03, R05, R13, R14, R19. Only the Host capability is scripted.
+mod membership_support;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -104,6 +105,8 @@ async fn start_router(
     });
     let mut h = HarnessBuilder::new(r.into_backend())
         .data_directory(directory.canonicalize().unwrap())
+        .installation(&"b".repeat(64), "Local")
+        .capability("teamarness.membership", membership_support::present())
         .capability_version("teamarness.package-ports", script, 3, 0)
         .start()
         .await;

@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 //! Verifies: TEAM.SYS.PKG-R03, R05, R13, R14, R19. Only the Host capability is scripted.
+#[path = "../membership_support/mod.rs"]
+pub mod membership_support;
 use base64::{Engine, engine::general_purpose::STANDARD};
 
 use serde_json::{Value, json};
@@ -116,6 +118,8 @@ pub async fn start_router(
     let script = ScriptedCapability::new().calls(move |m, p| provider.lock().unwrap().call(m, p));
     let mut h = HarnessBuilder::new(r.into_backend())
         .data_directory(directory.canonicalize().unwrap())
+        .installation(&"b".repeat(64), "Local")
+        .capability("teamarness.membership", membership_support::present())
         .capability_version("teamarness.package-ports", script, 3, 0)
         .start()
         .await;
@@ -209,6 +213,15 @@ pub struct Pause {
     pub entered: tokio::sync::Notify,
     release: Mutex<std::sync::mpsc::Receiver<()>>,
 }
+impl Pause {
+    pub fn wait(&self) {
+        self.release
+            .lock()
+            .unwrap()
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("test releases capability barrier");
+    }
+}
 pub struct Release(Option<std::sync::mpsc::Sender<()>>);
 impl Drop for Release {
     fn drop(&mut self) {
@@ -264,16 +277,14 @@ pub async fn scripted(
         };
         if let Some(p) = pause {
             p.entered.notify_one();
-            p.release
-                .lock()
-                .unwrap()
-                .recv_timeout(std::time::Duration::from_secs(30))
-                .expect("test releases capability barrier");
+            p.wait();
         }
         provider.lock().unwrap().call(method, payload)
     });
     let mut h = HarnessBuilder::new(r.into_backend())
         .data_directory(directory.canonicalize().unwrap())
+        .installation(&"b".repeat(64), "Local")
+        .capability("teamarness.membership", membership_support::present())
         .capability_version("teamarness.package-ports", script, 3, 0)
         .start()
         .await;

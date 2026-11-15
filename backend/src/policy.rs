@@ -64,6 +64,8 @@ pub struct Policy {
     entropy: Arc<dyn Entropy>,
     status: watch::Sender<Value>,
     active: AtomicBool,
+    eligible: AtomicBool,
+    removed: AtomicBool,
     pub(crate) workspace: Value,
     calls: crate::limits::Calls,
     rate: std::sync::Mutex<crate::limits::Rate>,
@@ -88,14 +90,18 @@ impl Policy {
             warning: None,
             listener: None,
         };
-        let (status, _) = watch::channel(status_value(&inner));
+        let mut initial = status_value(&inner);
+        initial["warning"] = "membership_unavailable".into();
+        let (status, _) = watch::channel(initial);
         Ok(Arc::new(Self {
             inner: Arc::new(Mutex::new(inner)),
             store,
             catalog,
             entropy,
             status,
-            active: AtomicBool::new(true),
+            active: AtomicBool::new(false),
+            eligible: AtomicBool::new(false),
+            removed: AtomicBool::new(false),
             workspace,
             calls: Default::default(),
             rate: Default::default(),
@@ -108,23 +114,77 @@ impl Policy {
     pub fn watch(&self) -> watch::Receiver<Value> {
         self.status.subscribe()
     }
+    fn membership_warning(&self) -> &'static str {
+        if self.removed.load(Ordering::SeqCst) {
+            "membership_removed"
+        } else {
+            "membership_unavailable"
+        }
+    }
+    fn publish_status(&self, owner: &Inner) {
+        let mut status = status_value(owner);
+        if !self.eligible.load(Ordering::SeqCst) {
+            status["warning"] = self.membership_warning().into();
+        }
+        self.status.send_replace(status);
+    }
     pub async fn suspend(&self) {
         self.active.store(false, Ordering::SeqCst);
         let mut owner = self.inner.lock().await;
         if let Some(listener) = owner.listener.take() {
             listener.stop().await;
         }
-        self.status.send_replace(status_value(&owner));
+        self.publish_status(&owner);
     }
     pub async fn resume(self: &Arc<Self>) {
+        if self.retired.is_cancelled() {
+            return;
+        }
         self.active.store(true, Ordering::SeqCst);
         let mut owner = self.inner.lock().await;
-        if owner.config.desired_enabled && owner.listener.is_none() {
+        self.start_listener(&mut owner).await;
+        self.publish_status(&owner);
+    }
+    fn can_listen(&self) -> bool {
+        self.active.load(Ordering::SeqCst)
+            && self.eligible.load(Ordering::SeqCst)
+            && !self.retired.is_cancelled()
+    }
+    pub(crate) async fn membership_unavailable(&self) {
+        self.eligible.store(false, Ordering::SeqCst);
+        self.status
+            .send_modify(|status| status["warning"] = self.membership_warning().into());
+        let mut owner = self.inner.lock().await;
+        if let Some(listener) = owner.listener.take() {
+            listener.stop().await;
+        }
+        self.publish_status(&owner);
+    }
+    pub(crate) async fn membership_observed(self: &Arc<Self>, present: bool) {
+        if !present {
+            self.removed.store(true, Ordering::SeqCst);
+        }
+        let eligible = present && !self.removed.load(Ordering::SeqCst);
+        if !eligible {
+            self.membership_unavailable().await;
+            return;
+        }
+        let mut owner = self.inner.lock().await;
+        self.eligible.store(true, Ordering::SeqCst);
+        self.start_listener(&mut owner).await;
+        self.publish_status(&owner);
+    }
+    async fn start_listener(self: &Arc<Self>, owner: &mut Inner) {
+        if self.can_listen()
+            && !owner.storage_failed
+            && owner.config.desired_enabled
+            && owner.listener.is_none()
+        {
             match crate::listener::bind(owner.config.port.unwrap_or(0)).await {
                 Ok(socket) => {
                     let mut next = owner.config.clone();
                     next.port = Some(socket.local_addr().expect("bound socket").port());
-                    if self.persist(&mut owner, next).await.is_ok() {
+                    if self.persist(owner, next).await.is_ok() && self.can_listen() {
                         owner.listener = Some(crate::listener::Listener::start(
                             socket,
                             Arc::downgrade(self),
@@ -135,7 +195,6 @@ impl Policy {
                 Err(_) => owner.warning = Some("listener_bind_failed"),
             }
         }
-        self.status.send_replace(status_value(&owner));
     }
     pub async fn dispose(&self) {
         self.suspend().await;
@@ -166,7 +225,7 @@ impl Policy {
         self.authenticate_inner(&owner, bearer)
     }
     fn authenticate_inner(&self, owner: &Inner, bearer: &str) -> Result<(), BackendError> {
-        if !self.active.load(Ordering::SeqCst)
+        if !self.can_listen()
             || owner.storage_failed
             || !owner.config.desired_enabled
             || !owner
@@ -234,7 +293,7 @@ impl Policy {
         let this = self.clone();
         tokio::spawn(async move {
             let result = this.apply(&mut owner, change).await;
-            this.status.send_replace(status_value(&owner));
+            this.publish_status(&owner);
             result
         })
         .await
@@ -474,7 +533,7 @@ impl Policy {
                 ok()
             }
         };
-        if rebind && next.desired_enabled {
+        if rebind && next.desired_enabled && self.can_listen() {
             match crate::listener::bind(next.port.unwrap_or(0)).await {
                 Ok(socket) => {
                     next.port = Some(
@@ -492,7 +551,7 @@ impl Policy {
             }
         }
         self.persist(inner, next).await?;
-        if let Some(socket) = provisional {
+        if let Some(socket) = provisional.filter(|_| self.can_listen()) {
             inner.listener = Some(crate::listener::Listener::start(
                 socket,
                 Arc::downgrade(self),

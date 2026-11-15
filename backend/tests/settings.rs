@@ -32,6 +32,8 @@ async fn setup(
     });
     let mut h = HarnessBuilder::new(router().into_backend())
         .data_directory(dir.canonicalize().unwrap())
+        .installation(&"b".repeat(64), "Local")
+        .capability("teamarness.membership", membership_support::present())
         .capability_version("teamarness.package-ports", script, 3, 0)
         .start()
         .await;

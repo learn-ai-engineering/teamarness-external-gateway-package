@@ -1,4 +1,5 @@
 //! Verifies: TEAM.SYS.PKG-R03, R13, R19. Bounded discovery through typed UI and SDK v3.
+mod membership_support;
 use serde_json::{Value, json};
 use teamarness_generated_package_backend::router;
 use teamarness_package_sdk::{
@@ -23,6 +24,8 @@ async fn one_ui_request_reads_one_bounded_host_page_and_never_enables_it() {
     let dir = tempfile::tempdir().unwrap();
     let mut h = HarnessBuilder::new(router().into_backend())
         .data_directory(dir.path().canonicalize().unwrap())
+        .installation(&"b".repeat(64), "Local")
+        .capability("teamarness.membership", membership_support::present())
         .capability_version("teamarness.package-ports", script.clone(), 3, 0)
         .start()
         .await;
@@ -57,6 +60,8 @@ async fn catalog_churn_restarts_once_then_refuses_without_dispatch() {
     let dir = tempfile::tempdir().unwrap();
     let mut h = HarnessBuilder::new(router().into_backend())
         .data_directory(dir.path().canonicalize().unwrap())
+        .installation(&"b".repeat(64), "Local")
+        .capability("teamarness.membership", membership_support::present())
         .capability_version("teamarness.package-ports", script.clone(), 3, 0)
         .start()
         .await;
@@ -93,6 +98,8 @@ async fn conversations_contract_or_provider_is_visible_as_excluded_and_refused_d
         let dir = tempfile::tempdir().unwrap();
         let mut h = HarnessBuilder::new(router().into_backend())
             .data_directory(dir.path().canonicalize().unwrap())
+            .installation(&"b".repeat(64), "Local")
+            .capability("teamarness.membership", membership_support::present())
             .capability_version("teamarness.package-ports", script, 3, 0)
             .start()
             .await;
@@ -114,6 +121,8 @@ async fn oversized_summary_page_is_refused_not_truncated() {
     let dir = tempfile::tempdir().unwrap();
     let mut h = HarnessBuilder::new(router().into_backend())
         .data_directory(dir.path().canonicalize().unwrap())
+        .installation(&"b".repeat(64), "Local")
+        .capability("teamarness.membership", membership_support::present())
         .capability_version("teamarness.package-ports", script, 3, 0)
         .start()
         .await;

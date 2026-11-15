@@ -1,4 +1,5 @@
 //! Verifies: TEAM.SYS.PKG-R03, R05, R19. Typed UI requests through the real SDK router.
+mod membership_support;
 use serde_json::json;
 use teamarness_generated_package_backend::router;
 use teamarness_package_sdk::testing::{
@@ -16,6 +17,8 @@ async fn default_disabled_tokens_are_durable_and_secrets_are_one_time() {
     let dir = tempfile::tempdir().unwrap();
     let mut h = HarnessBuilder::new(router().into_backend())
         .data_directory(dir.path().canonicalize().unwrap())
+        .installation(&"b".repeat(64), "Local")
+        .capability("teamarness.membership", membership_support::present())
         .capability_version("teamarness.package-ports", ScriptedCapability::new(), 3, 0)
         .start()
         .await;
@@ -57,6 +60,8 @@ async fn default_disabled_tokens_are_durable_and_secrets_are_one_time() {
     h.shutdown().await.unwrap();
     let mut h = HarnessBuilder::new(router().into_backend())
         .data_directory(dir.path().canonicalize().unwrap())
+        .installation(&"b".repeat(64), "Local")
+        .capability("teamarness.membership", membership_support::present())
         .capability_version("teamarness.package-ports", ScriptedCapability::new(), 3, 0)
         .start()
         .await;
@@ -97,6 +102,8 @@ async fn failed_revocation_cannot_be_resurrected_by_a_later_unrelated_write() {
         router_with_storage_fault(Arc::new(OsEntropy), Some(fault.clone())).into_backend(),
     )
     .data_directory(dir.path().canonicalize().unwrap())
+    .installation(&"b".repeat(64), "Local")
+    .capability("teamarness.membership", membership_support::present())
     .capability_version("teamarness.package-ports", ScriptedCapability::new(), 3, 0)
     .start()
     .await;
@@ -170,6 +177,8 @@ async fn cancelled_waiter_cannot_release_actual_file_transaction_ownership() {
         router_with_storage_fault(Arc::new(OsEntropy), Some(fault.clone())).into_backend(),
     )
     .data_directory(dir.path().canonicalize().unwrap())
+    .installation(&"b".repeat(64), "Local")
+    .capability("teamarness.membership", membership_support::present())
     .capability_version("teamarness.package-ports", ScriptedCapability::new(), 3, 0)
     .start()
     .await;
@@ -214,6 +223,8 @@ async fn token_limit_and_closed_ui_requests_fail_without_secret_or_partial_write
     let dir = tempfile::tempdir().unwrap();
     let mut h = HarnessBuilder::new(router().into_backend())
         .data_directory(dir.path().canonicalize().unwrap())
+        .installation(&"b".repeat(64), "Local")
+        .capability("teamarness.membership", membership_support::present())
         .capability_version("teamarness.package-ports", ScriptedCapability::new(), 3, 0)
         .start()
         .await;
@@ -273,6 +284,8 @@ async fn entropy_failure_is_visible_and_cannot_create_credentials() {
     let mut h =
         HarnessBuilder::new(router_with_entropy(std::sync::Arc::new(Broken)).into_backend())
             .data_directory(dir.path().canonicalize().unwrap())
+            .installation(&"b".repeat(64), "Local")
+            .capability("teamarness.membership", membership_support::present())
             .capability_version("teamarness.package-ports", ScriptedCapability::new(), 3, 0)
             .start()
             .await;

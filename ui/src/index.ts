@@ -35,7 +35,14 @@ export function mount(context: PackageMountContext): PackageUnmount {
     );
     if (value.running && value.port) statusArea.append(node("code", `http://127.0.0.1:${value.port}/v1`));
     if (value.storageFailed) statusArea.append(node("p", "Storage failed. Access is closed until a durable action reconciles state."));
-    if (value.warning) statusArea.append(node("p", value.warning));
+    if (value.warning) {
+      const warning = value.warning === "membership_removed"
+        ? "This Installation is no longer a Workspace member. External access stays stopped; saved setup is retained."
+        : value.warning === "membership_unavailable"
+          ? "Membership monitoring is unavailable. External access is closed. A live valid notification may recover it; after stream termination, explicitly recover or reload the Package."
+          : value.warning;
+      statusArea.append(node("p", warning));
+    }
     updateView(value);
   };
   const renderView = () => {
