@@ -1,0 +1,79 @@
+[
+  {
+    "definition": "call",
+    "value": {
+      "contract": "dev.example.reads",
+      "major": 1,
+      "port": "item.get",
+      "request": {
+        "id": "example"
+      }
+    }
+  },
+  {
+    "definition": "result",
+    "value": {
+      "result": null
+    }
+  },
+  {
+    "definition": "result",
+    "value": {
+      "result": [
+        1,
+        false
+      ]
+    }
+  },
+  {
+    "definition": "onboarding",
+    "value": {
+      "markdown": "Authorization: Bearer <BEARER>"
+    }
+  },
+  {
+    "definition": "contracts",
+    "value": {
+      "contracts": [],
+      "nextCursor": null
+    }
+  },
+  {
+    "definition": "error",
+    "value": {
+      "error": {
+        "source": "gateway",
+        "code": "external_gateway.unauthorized",
+        "retryable": false,
+        "outcomeUncertain": false,
+        "details": {}
+      }
+    }
+  },
+  {
+    "definition": "error",
+    "value": {
+      "error": {
+        "source": "host",
+        "code": "deadline_exceeded",
+        "retryable": true,
+        "outcomeUncertain": false,
+        "details": {}
+      }
+    }
+  },
+  {
+    "definition": "error",
+    "value": {
+      "error": {
+        "source": "provider",
+        "code": "example.limit",
+        "retryable": true,
+        "outcomeUncertain": false,
+        "details": {
+          "limit": 10
+        }
+      }
+    }
+  }
+]

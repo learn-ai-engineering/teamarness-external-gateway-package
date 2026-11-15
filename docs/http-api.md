@@ -1,8 +1,8 @@
 # External Gateway HTTP v1 reference
 
-Phase 3 defines durable policy and contracts. This build starts no HTTP listener. Phase 4 implements and qualifies the transport below; these routes are not yet available.
+The Backend serves HTTP/1.1 on `127.0.0.1:<saved-port>`. It starts disabled. All six routes require one `Authorization: Bearer <BEARER>` header. The UI uses the Package bridge, never HTTP.
 
-## Planned authenticated routes
+## Authenticated routes
 
 - `GET /v1`: manifest and Workspace identity.
 - `GET /v1/onboarding`: generic instructions with a bearer placeholder.
@@ -21,7 +21,7 @@ A failed persistence operation never reports success. An uncertain operation rer
 
 ## Transport budgets
 
-Timeout and interval values are seconds; byte values are bytes. The schema and Rust constants must match this table. Transport boundary tests arrive with phase 4; these numbers are not a passing transport claim.
+Timeout and interval values are seconds; byte values are bytes. The schema and Rust constants must match this table. These limits apply independently of Host route, Provider and byte budgets.
 
 | Constant | Value |
 |---|---:|
@@ -33,7 +33,7 @@ Timeout and interval values are seconds; byte values are bytes. The schema and R
 | `RESPONSE_WRITE_TIMEOUT` | 5 |
 | `REQUESTS_PER_SECOND` | 8 |
 | `REQUEST_BURST` | 16 |
-| `MAX_HOST_CALLS` | 4 |
+| `MAX_HOST_CALLS` | 12 |
 | `TOOL_WAIT_TIMEOUT` | 25 |
 | `PORT_VALUE_BYTES` | 262144 |
 | `ENVELOPE_ALLOWANCE_BYTES` | 4096 |
@@ -46,3 +46,56 @@ Timeout and interval values are seconds; byte values are bytes. The schema and R
 | `CATALOG_POLL_INTERVAL` | 5 |
 | `CATALOG_READ_TIMEOUT` | 5 |
 | `LISTENER_DRAIN_TIMEOUT` | 5 |
+
+## Response contracts
+
+`contracts/http-v1.schema.json` defines closed request and response envelopes. `contracts/http-v1.examples.json` contains validated examples. Successful responses use `application/json`:
+
+| Route | Response definition |
+|---|---|
+| `/v1` | `manifest`: Workspace, version, read-only flag, discovery links and principal value/call limits |
+| `/v1/onboarding` | `onboarding`: generic Markdown with a `<BEARER>` placeholder |
+| `/v1/contracts?cursor=...` | `contracts`: at most 32 currently usable selected contracts and nullable `nextCursor` |
+| `/v1/contracts/{contract}/{major}` | `schema`: complete filtered document, original metadata digest and actual projection digest |
+| `/v1/contracts/{contract}/{major}/guide` | `guide`: unedited live Markdown, original-byte SHA-256, contract major/minor and exposed-operation preface |
+| `/v1/call` | `result`: the original JSON value, including arrays, scalars, null and envelope-like objects |
+
+POST accepts exactly `application/json`, without a content encoding. The serialized original `request` and result each have a 256 KiB budget. The surrounding call envelope has an additional 4 KiB allowance. Schema responses retain complete reachable definitions and never truncate a successful document. A guide whose complete preface and original Markdown exceed the value budget plus allowance is refused with `too_large`, never truncated. Metadata cache capacity is 16 MiB of serialized documents, using least-recently-used eviction. A hit still requires current offered metadata/revision and current exact policy. Cached compilation has bounded nonwaiting admission; cancelled observers do not release its blocking-work permit early.
+
+A catalog page can be empty while `nextCursor` is non-null. Continue with that opaque base64url cursor. Invalid or stale caller cursors are refused. Internal contract lookup restarts a stale catalog at most once. No invocation is replayed after a stale revision. Disabled or stale-schema contracts expose neither schemas nor summaries.
+
+## Refusals and transport policy
+
+Errors are `{error:{source,code,retryable,outcomeUncertain,details}}`. Source is `gateway`, `host`, or `provider`. Host codes remain intact. A Provider error exposes its safe namespaced code and flags. Uncertainty forbids a retryable verdict. Details project only numeric/Boolean bounds and bounded identifier strings under `limit`, `maximum`, `minimum`, `actual`, `expected`, `retryAfterMs`, `field`, or `reason`. Paths, credentials, nested arbitrary input and transport internals are omitted. This projection is below 4 KiB and depth 8.
+
+| Gateway code suffix | HTTP status |
+|---|---:|
+| `unauthorized` | 401 |
+| `bad_request` | 400 |
+| `forbidden` | 403 |
+| `not_found` | 404 |
+| `method_not_allowed` | 405 |
+| `unsupported_media_type` | 415 |
+| `too_large` | 413 |
+| `rate_limited` | 429 |
+| `busy` | 503 |
+| `timeout` | 504 |
+| `catalog_changed` | 409 |
+| `unavailable` | 503 |
+| `storage_failed` | 503 |
+
+Host `deadline_exceeded` uses 504; `port_catalog_changed` uses 409. Other Host/Provider errors use 503 alongside their machine-readable code. The gateway never retries work automatically.
+
+Every application response has `Cache-Control: no-store`, `X-Content-Type-Options: nosniff` and a closed connection. Parser, incomplete-header, ambiguous-framing and connection-capacity refusals may close without an application response. Hyper owns HTTP framing. A bounded raw-header preflight refuses duplicate lengths and simultaneous Content-Length/Transfer-Encoding before Hyper can normalize them. Header bytes include the request line and terminating CRLFs. Exactly one numeric configured Host and one Authorization are required. Origin (including `null`), absolute-form targets, cookies, token query parameters, upgrades, trailers, batching, streams, unsupported encodings and unknown call fields are refused. No CORS, redirects or WebSocket surface exists.
+
+## Ownership and lifecycle
+
+`MAX_HOST_CALLS` means 12 outstanding gateway SDK call operations, including guide reads and their metadata checks. The 13th is refused without a waiting queue. It does not mean 12 simultaneous Provider executions: unchanged Host route, Provider and byte budgets can refuse earlier.
+
+The 25-second HTTP budget is an upper observation ceiling. Earlier Host, SDK and Provider terminals return immediately. Every SDK terminal releases the local slot, including timeout, unavailability and overload. A disconnected or timed-out HTTP observer does not release a still-pending local operation. Suspend closes accepts and drains connection observers for at most five seconds. Pending SDK operations remain counted across recovery; disposal/shutdown retires local tasks. A completed SDK timeout does not quarantine capacity or require restart. None of these terminals proves that arbitrary Provider-native work stopped.
+
+First enable binds an IPv4 ephemeral port, durably saves it and desired enabled state, then publishes running status. Status `running` plus saved `port` identifies `http://127.0.0.1:<port>/v1`; no URL is published before persistence. Later activation/recovery binds only the saved port. A conflict leaves desired setup intact with `listener_bind_failed` and no running endpoint. An explicit port change closes the old endpoint and publishes the new one only after bind and durable commit; failure leaves stopped/error state, not an uncommitted URL. UI hiding does not change listener lifetime.
+
+Authorization is checked again after metadata and slot admission, immediately before the owned SDK call starts. Successful disable/revoke/regenerate prevents later affected authorization. Already-authorized reads may finish. Tokens and desired setup survive restart/reinstall unless explicitly disabled/revoked.
+
+Served guidance treats Provider text as untrusted data. An external client may make at most one delayed retry of a retryable ordinary read only if the current Provider guide permits. Persistent failure, authentication/policy/schema refusal, and `port_catalog_changed` stop the procedure; no rapid retry loop is recommended.

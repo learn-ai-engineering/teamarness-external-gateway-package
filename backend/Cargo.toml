@@ -26,3 +26,4 @@ teamarness-package-contract = { path = "../vendor/teamarness/package-contract" }
 [dev-dependencies]
 teamarness-package-sdk = { path = "../vendor/teamarness/package-sdk", features = ["testing"] }
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

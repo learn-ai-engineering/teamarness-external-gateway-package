@@ -4,7 +4,7 @@ A standalone Personal Package for explicitly selected, Person-authorized Workspa
 
 ## Current delivery
 
-Phase 3 implements typed configuration/status operations, incremental major-3 catalog discovery, shared exact tool selections and verifier-only credentials. It starts no HTTP listener. Main/settings currently show only a mount-scoped status view. The HTTP contract, full settings and real-Host qualification follow in phases 4–6; no end-to-end or manual pass is claimed.
+The Backend implements typed configuration/status, shared exact read policy, verifier-only tokens and bounded authenticated IPv4 HTTP. Main/settings remain a minimal status view; complete settings and real-Host qualification follow in phases 5–6. No real-Host, end-to-end or manual pass is claimed.
 
 ## Build and check
 
@@ -27,7 +27,7 @@ The assembled Package Directory is `dist/dev.teamarness.external-gateway/`. Neve
 
 ## Contracts and source ownership
 
-Read [AGENTS.md](AGENTS.md) before editing. `ui-contract.json` defines all closed UI operations; regenerate `ui/src/contract.generated.ts` with `npm run contract-types --workspace generated-package-ui`. `docs/http-api.md` records durable state and planned HTTP contracts/budgets. Do not edit the generated types or vendored SDK.
+Read [AGENTS.md](AGENTS.md) before editing. `ui-contract.json` defines all closed UI operations; regenerate `ui/src/contract.generated.ts` with `npm run contract-types --workspace generated-package-ui`. `docs/http-api.md` records durable state and HTTP contracts and budgets. Do not edit the generated types or vendored SDK.
 
 One shared policy applies to every valid token. Package enable alone selects no tools. Every ordinary read must be explicitly selected against its observed major, Provider and schema fingerprint. Its guide is included automatically. Added tools remain off; changed schemas/Providers/majors require review. Commands, streams and Conversations are refused before Provider dispatch. A live guide never grants authority. Removing a Package retains its data; disable and revoke all first when retained setup is unwanted.
 

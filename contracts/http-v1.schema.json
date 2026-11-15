@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "External Gateway HTTP v1 contract definitions (transport implementation follows in phase 4)",
+  "title": "External Gateway HTTP v1",
   "$defs": {
     "call": {
       "type": "object",
@@ -27,6 +27,277 @@
         "request": {}
       },
       "additionalProperties": false
+    },
+    "error": {
+      "type": "object",
+      "required": [
+        "error"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": [
+            "source",
+            "code",
+            "retryable",
+            "outcomeUncertain",
+            "details"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "enum": [
+                "gateway",
+                "host",
+                "provider"
+              ]
+            },
+            "code": {
+              "type": "string",
+              "pattern": "^[a-z0-9_.-]{1,128}$"
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "outcomeUncertain": {
+              "type": "boolean"
+            },
+            "details": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": [
+        "result"
+      ],
+      "properties": {
+        "result": {}
+      },
+      "additionalProperties": false
+    },
+    "manifest": {
+      "type": "object",
+      "required": [
+        "version",
+        "readOnly",
+        "workspace",
+        "routes",
+        "limits"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "readOnly": {
+          "const": true
+        },
+        "workspace": {
+          "type": "object",
+          "required": [
+            "id",
+            "name"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "routes": {
+          "type": "object",
+          "required": [
+            "contracts",
+            "onboarding",
+            "call"
+          ],
+          "properties": {
+            "contracts": {
+              "const": "/v1/contracts"
+            },
+            "onboarding": {
+              "const": "/v1/onboarding"
+            },
+            "call": {
+              "const": "/v1/call"
+            }
+          },
+          "additionalProperties": false
+        },
+        "limits": {
+          "type": "object",
+          "required": [
+            "outstandingSdkInvocations",
+            "portValueBytes",
+            "metadataBytes",
+            "toolWaitSeconds"
+          ],
+          "properties": {
+            "outstandingSdkInvocations": {
+              "const": 12
+            },
+            "portValueBytes": {
+              "const": 262144
+            },
+            "metadataBytes": {
+              "const": 1048576
+            },
+            "toolWaitSeconds": {
+              "const": 25
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "onboarding": {
+      "type": "object",
+      "required": [
+        "markdown"
+      ],
+      "properties": {
+        "markdown": {
+          "type": "string",
+          "maxLength": 8192
+        }
+      },
+      "additionalProperties": false
+    },
+    "contracts": {
+      "type": "object",
+      "required": [
+        "contracts",
+        "nextCursor"
+      ],
+      "properties": {
+        "contracts": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "required": [
+              "contract",
+              "major",
+              "minor"
+            ],
+            "properties": {
+              "contract": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "major": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "minor": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "maxLength": 2048
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "schema": {
+      "type": "object",
+      "required": [
+        "contract",
+        "major",
+        "minor",
+        "metadataSha256",
+        "projectionSha256",
+        "schema"
+      ],
+      "properties": {
+        "contract": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "major": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "minor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "metadataSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "projectionSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "schema": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "guide": {
+      "type": "object",
+      "required": [
+        "contract",
+        "major",
+        "minor",
+        "markdown",
+        "preface",
+        "guideSha256"
+      ],
+      "properties": {
+        "contract": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "major": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "minor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "markdown": {
+          "type": "string"
+        },
+        "preface": {
+          "type": "string"
+        },
+        "guideSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "x-limits": {
@@ -38,7 +309,7 @@
     "RESPONSE_WRITE_TIMEOUT": 5,
     "REQUESTS_PER_SECOND": 8,
     "REQUEST_BURST": 16,
-    "MAX_HOST_CALLS": 4,
+    "MAX_HOST_CALLS": 12,
     "TOOL_WAIT_TIMEOUT": 25,
     "PORT_VALUE_BYTES": 262144,
     "ENVELOPE_ALLOWANCE_BYTES": 4096,
@@ -51,5 +322,20 @@
     "CATALOG_POLL_INTERVAL": 5,
     "CATALOG_READ_TIMEOUT": 5,
     "LISTENER_DRAIN_TIMEOUT": 5
+  },
+  "x-gateway-status": {
+    "unauthorized": 401,
+    "bad_request": 400,
+    "forbidden": 403,
+    "not_found": 404,
+    "method_not_allowed": 405,
+    "unsupported_media_type": 415,
+    "too_large": 413,
+    "rate_limited": 429,
+    "busy": 503,
+    "timeout": 504,
+    "catalog_changed": 409,
+    "unavailable": 503,
+    "storage_failed": 503
   }
 }

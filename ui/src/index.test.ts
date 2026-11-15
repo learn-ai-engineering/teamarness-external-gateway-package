@@ -86,7 +86,7 @@ describe("External Gateway status UI", () => {
     expect(texts(root)).toEqual([
       "External Gateway",
       "Read-only access disabled",
-      "0 tokens. HTTP listener is not available in this build.",
+      "0 tokens. HTTP listener stopped.",
     ]);
 
     unmount();

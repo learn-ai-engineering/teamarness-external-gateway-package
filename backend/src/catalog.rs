@@ -15,6 +15,8 @@ use teamarness_package_sdk::{
 pub const CONVERSATIONS: &str = "dev.teamarness.conversations";
 pub struct Catalog {
     client: PortClientV3,
+    cache: std::sync::Mutex<MetadataCache>,
+    compilers: std::sync::Arc<tokio::sync::Semaphore>,
 }
 pub struct Observed {
     pub summary: ContractSummaryV3,
@@ -109,7 +111,13 @@ fn route(row: &ContractSummaryV3) -> PortContractRef<'_> {
 }
 impl Catalog {
     pub fn new(client: PortClientV3) -> Self {
-        Self { client }
+        Self {
+            client,
+            cache: Default::default(),
+            compilers: std::sync::Arc::new(tokio::sync::Semaphore::new(
+                crate::limits::MAX_CONNECTIONS,
+            )),
+        }
     }
     pub async fn page(&self, cursor: Option<&str>) -> Result<PortPageV3, BackendError> {
         self.client.available(PortAccessV3::Person, cursor).await
@@ -147,7 +155,32 @@ impl Catalog {
                     .metadata_sha256
                     .as_deref()
                     .ok_or_else(|| error("unavailable"))?;
-                let document = self.client.describe(route(&summary), digest).await?;
+                let cached = self.cache.lock().expect("metadata cache").get(digest);
+                let document = if let Some(bytes) = cached {
+                    let permit = self
+                        .compilers
+                        .clone()
+                        .try_acquire_owned()
+                        .map_err(|_| error("busy"))?;
+                    tokio::task::spawn_blocking(move || {
+                        let _permit = permit;
+                        teamarness_package_contract::port_contract::compile_port_contracts(&bytes)
+                    })
+                    .await
+                    .map_err(|_| error("unavailable"))?
+                    .map_err(|_| error("unavailable"))?
+                } else {
+                    let document = self.client.describe(route(&summary), digest).await?;
+                    let bytes = document
+                        .project_metadata(contract, None)
+                        .map_err(|_| error("unavailable"))?
+                        .bytes;
+                    self.cache
+                        .lock()
+                        .expect("metadata cache")
+                        .insert(digest.to_owned(), bytes);
+                    document
+                };
                 if !document.has_guide(contract) {
                     return Err(error("forbidden"));
                 }
@@ -176,5 +209,65 @@ impl Catalog {
             return Err(error("forbidden"));
         }
         self.client.query(observed.route(), port, request).await
+    }
+}
+
+pub fn digest(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// LRU accounting is over exact cached metadata bytes, not a count of Providers.
+#[derive(Default)]
+struct MetadataCache {
+    entries: std::collections::VecDeque<(String, std::sync::Arc<Vec<u8>>)>,
+    bytes: usize,
+}
+impl MetadataCache {
+    fn get(&mut self, key: &str) -> Option<std::sync::Arc<Vec<u8>>> {
+        let i = self.entries.iter().position(|(k, _)| k == key)?;
+        let entry = self.entries.remove(i)?;
+        let bytes = entry.1.clone();
+        self.entries.push_back(entry);
+        Some(bytes)
+    }
+    fn insert(&mut self, key: String, bytes: Vec<u8>) {
+        if bytes.len() > crate::limits::METADATA_BYTES {
+            return;
+        }
+        if let Some(i) = self.entries.iter().position(|(k, _)| k == &key) {
+            self.bytes -= self.entries.remove(i).expect("entry").1.len();
+        }
+        while self.bytes + bytes.len() > crate::limits::METADATA_CACHE_BYTES {
+            self.bytes -= self.entries.pop_front().expect("cache capacity").1.len();
+        }
+        self.bytes += bytes.len();
+        self.entries.push_back((key, std::sync::Arc::new(bytes)));
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    #[test]
+    fn metadata_cache_keeps_exact_sixteen_mib_and_evicts_least_recently_used() {
+        let mut cache = MetadataCache::default();
+        for i in 0..16 {
+            cache.insert(i.to_string(), vec![0; crate::limits::METADATA_BYTES]);
+        }
+        assert_eq!(cache.bytes, crate::limits::METADATA_CACHE_BYTES);
+        assert!(cache.get("0").is_some());
+        cache.insert("16".into(), vec![0; crate::limits::METADATA_BYTES]);
+        assert_eq!(cache.bytes, crate::limits::METADATA_CACHE_BYTES);
+        assert!(cache.get("1").is_none());
+        assert!(cache.get("0").is_some());
+        cache.insert(
+            "too-large".into(),
+            vec![0; crate::limits::METADATA_BYTES + 1],
+        );
+        assert!(cache.get("too-large").is_none());
+        assert_eq!(cache.bytes, crate::limits::METADATA_CACHE_BYTES);
     }
 }

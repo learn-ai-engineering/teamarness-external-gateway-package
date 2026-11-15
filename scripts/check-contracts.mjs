@@ -18,3 +18,15 @@ for(const [name,value] of Object.entries(limits)){
 }
 execFileSync("npm",["run","contract-types","--workspace","generated-package-ui","--","--check"],{stdio:"inherit"});
 console.log("Closed UI contract, generated types, declared capabilities and planned HTTP budgets match.");
+const http=JSON.parse(read("../contracts/http-v1.schema.json"));
+assert.equal(http["x-limits"].MAX_HOST_CALLS,12);
+assert.equal(http.$defs.manifest.properties.limits.properties.outstandingSdkInvocations.const,12);
+for(const name of ["call","result","error","manifest","contracts","schema","guide","onboarding"]){
+ assert.equal(http.$defs[name].additionalProperties,false);
+ assert.deepEqual([...http.$defs[name].required].sort(),Object.keys(http.$defs[name].properties).sort());
+}
+for(const [code,status] of Object.entries(http["x-gateway-status"]))assert.ok(docs.includes(`| \`${code}\` | ${status} |`));
+for(const example of JSON.parse(read("../contracts/http-v1.examples.json")))assert.ok(http.$defs[example.definition]);
+assert.ok(docs.includes("Every SDK terminal releases the local slot"));
+assert.ok(docs.includes("25-second HTTP budget"));
+console.log("HTTP envelope definitions, examples, documented status codes and invocation budgets match.");

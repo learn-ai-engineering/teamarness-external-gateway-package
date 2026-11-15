@@ -48,7 +48,7 @@ export function mount(context: PackageMountContext): PackageUnmount {
     .then((response) => {
       if (unmounted) return;
       message.textContent = response.desiredEnabled ? "Read-only access configured" : "Read-only access disabled";
-      reads.textContent = `${response.tokens.length} tokens. HTTP listener is not available in this build.`;
+      reads.textContent = `${response.tokens.length} tokens. ${response.running && response.port ? `http://127.0.0.1:${response.port}/v1` : "HTTP listener stopped."}`;
     })
     .catch(fail);
 

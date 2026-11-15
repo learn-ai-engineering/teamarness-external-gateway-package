@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
-//! Standalone Person-authorized read policy. HTTP transport is a later phase.
+//! Standalone Person-authorized read policy and bounded loopback HTTP.
 pub mod catalog;
 pub mod config;
+pub mod http;
 pub mod limits;
+pub mod listener;
 pub mod policy;
 pub mod tokens;
 use policy::{Change, Policy};
@@ -12,10 +14,22 @@ use std::sync::Arc;
 use teamarness_package_sdk::{BackendError, Context, Empty, Router, event_channel};
 
 pub fn error(code: &str) -> BackendError {
-    BackendError::new(format!("external_gateway.{code}"), false, json!({}))
+    BackendError::new(
+        format!("external_gateway.{code}"),
+        matches!(
+            code,
+            "busy" | "rate_limited" | "timeout" | "unavailable" | "storage_failed"
+        ),
+        json!({}),
+    )
 }
 pub struct State {
     pub policy: Arc<Policy>,
+}
+impl Drop for State {
+    fn drop(&mut self) {
+        self.policy.retire();
+    }
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -57,18 +71,20 @@ pub fn router_with_storage_fault(
     fault: Option<Arc<dyn config::StorageFault>>,
 ) -> Router<State> {
     Router::new(move |activation| {
+        let workspace=json!({"id":activation.initialization().workspace().id,"name":activation.initialization().workspace().name});
         let path=activation.data_directory().to_owned();let entropy=entropy.clone();let fault=fault.clone();
         let client=teamarness_package_sdk::ports_v3::PortClientV3::from_initialization(activation.initialization(),activation.capabilities().clone());
         async move {
             let client=client?;
             let store=tokio::task::spawn_blocking(move||config::FileStore::open(&path).map(|store|match fault {Some(f)=>store.with_fault(f),None=>store})).await.map_err(|_|error("storage_failed"))?.map_err(|_|error("storage_failed"))?;
-            let policy=Policy::open(store,catalog::Catalog::new(client),entropy).await?;
+            let policy=Policy::open(store,catalog::Catalog::new(client),entropy,workspace).await?;
+            policy.resume().await;
             Ok(State{policy})
         }
     })
     .on_suspend(|s:Arc<State>|async move{s.policy.suspend().await;Ok(())})
-    .on_dispose(|s:Arc<State>|async move{s.policy.suspend().await;Ok(())})
-    .on_resume(|s:Arc<State>|async move{s.policy.resume();Ok(())})
+    .on_dispose(|s:Arc<State>|async move{s.policy.dispose().await;Ok(())})
+    .on_resume(|s:Arc<State>|async move{s.policy.resume().await;Ok(())})
     .request("external-gateway.status.get",|c:Context<State>,_:Empty|async move{Ok(c.state().policy.status())})
     .request("external-gateway.catalog.page",|c:Context<State>,p:Page|async move{c.state().policy.catalog_page(p.cursor.as_deref(),p.contract.as_deref(),p.offset).await})
     .request("external-gateway.listener.set",|c:Context<State>,p:Enabled|async move{c.state().policy.change(Change::Listener(p.enabled)).await})
