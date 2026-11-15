@@ -621,8 +621,9 @@ impl Policy {
             this.authenticate_inner(&owner,&bearer)?;
             authorize(&owner.config,&observed,major,&port)?;
             let ports=exposed(&owner.config,&observed)?;
-            // This is the local admission point. No intervening metadata/waiter work is queued.
-            // Already-authorized reads may finish after an acknowledged policy transition.
+            // Final local admission uses current policy, not an SDK enqueue receipt.
+            // The first poll can wait inside the SDK before handoff. This admitted read
+            // may be sent and finish after a later policy transition acknowledges success.
             let call=this.catalog.query(&observed,&port,request);
             tokio::pin!(call);
             let mut initial=None;

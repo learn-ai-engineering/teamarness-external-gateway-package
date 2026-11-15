@@ -41,3 +41,12 @@ const catalogUi=read("../ui/src/catalog.ts");
 assert.ok(catalogUi.includes(`const POLL_MS = ${limits.CATALOG_POLL_INTERVAL*1000};`));
 assert.ok(catalogUi.includes(`const READ_MS = ${limits.CATALOG_READ_TIMEOUT*1000};`));
 console.log("Shared onboarding and settings deadlines match the accepted budgets.");
+
+const cursor=http.$defs.contracts.properties.nextCursor.anyOf.find(s=>s.type==="string");
+assert.equal(cursor.maxLength,limits.MAX_HTTP_CURSOR_CHARS);
+assert.equal(cursor.minLength,1);
+assert.equal(cursor.pattern,"^[A-Za-z0-9_-]+$");
+assert.equal(limits.MAX_HTTP_CURSOR_CHARS,Math.ceil(limits.MAX_HOST_CURSOR_BYTES*4/3));
+assert.equal(ui.requests["external-gateway.catalog.page"].request.properties.cursor.maxLength,limits.MAX_HOST_CURSOR_BYTES);
+assert.equal(limits.MAX_TARGET_BYTES,4096);
+console.log("HTTP cursor envelope bounds agree; Host/UI cursor and request-target budgets remain unchanged.");

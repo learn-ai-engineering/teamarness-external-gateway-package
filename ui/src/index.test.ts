@@ -31,6 +31,8 @@ describe("External Gateway main/settings mount", () => {
     expect(client.calls.filter(c => c.operation === "external-gateway.catalog.page")).toHaveLength(0);
     button(root, "Settings").click(); await flush();
     expect(root.textContent).toContain("All tokens share");
+    expect(root.textContent).toContain("passed local admission may still be sent to the Host");
+    expect(root.textContent).toContain("external agent's own stop control");
     expect(client.calls.filter(c => c.operation === "external-gateway.catalog.page")).toHaveLength(1);
     button(root, "Overview").click(); await flush();
     expect(root.textContent).toContain("External-agent onboarding");
@@ -98,7 +100,8 @@ describe("Shared settings and one-time tokens", () => {
     expect(root.textContent).toContain("host_cleanup_failed");
     button(root, "Disable and revoke all tokens").click(); await flush();
     expect(client.calls).toContainEqual({ operation: "external-gateway.disable-and-revoke-all", payload: {} });
-    expect(root.textContent).toContain("Already-authorized reads may finish");
+    expect(root.textContent).toContain("may still be sent to the Host and finish after disable, revoke or regeneration succeeds");
+    expect(root.textContent).toContain("Later admissions use the new policy");
     expect(root.textContent).toContain("restart and reinstall");
     expect(root.all().filter(e => e.tagName === "input").map(e => e.attributes.get("aria-label"))).toEqual(["Saved port", "Token label"]);
     expect(client.calls.filter(c => c.operation.includes("token.")).every(c => !JSON.stringify(c.payload).includes("secret"))).toBe(true);

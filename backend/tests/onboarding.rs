@@ -24,6 +24,8 @@ async fn generic_read(port: u16, bearer: &str) -> Value {
     assert!(guidance.contains("at most one delayed retry"));
     assert!(guidance.contains("guideSha256"));
     assert!(guidance.contains("projectionSha256"));
+    assert!(guidance.contains("may still be sent to the Host"));
+    assert!(guidance.contains("external agent's own stop control"));
     let contracts_route = manifest["routes"]["contracts"].as_str().unwrap();
     let mut cursor = None;
     loop {

@@ -119,7 +119,7 @@ async fn malformed_headers_targets_and_methods_cannot_dispatch() {
     }
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn token_revoke_and_regenerate_after_initial_auth_prevent_final_enqueue() {
+async fn token_revoke_and_regenerate_before_final_local_admission_prevent_dispatch() {
     use teamarness_generated_package_backend::policy::Change;
     for regenerate in [false, true] {
         let d = tempfile::tempdir().unwrap();
@@ -177,7 +177,7 @@ async fn already_authorized_read_finishes_once_after_revoke() {
     h.shutdown().await.unwrap();
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn tool_or_master_disable_between_authentication_and_enqueue_prevents_dispatch() {
+async fn tool_or_master_disable_before_final_local_admission_prevents_dispatch() {
     use teamarness_generated_package_backend::policy::{Change, ToolChange};
     for master in [false, true] {
         let d = tempfile::tempdir().unwrap();

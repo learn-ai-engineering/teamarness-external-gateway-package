@@ -19,3 +19,23 @@ fn http_examples_obey_closed_schemas_and_error_envelope() {
         assert!(compiled.validate_response("test.http", &extra).is_err());
     }
 }
+
+#[test]
+fn http_cursor_schema_accepts_encoded_host_limit_but_not_larger_or_non_url_safe_values() {
+    let schema: Value =
+        serde_json::from_str(include_str!("../../contracts/http-v1.schema.json")).unwrap();
+    let contract = json!({"schemaVersion":1,"$defs":schema["$defs"],"requests":{"test.page":{"request":{"type":"object","additionalProperties":false},"response":{"$ref":"#/$defs/contracts"}}},"subscriptions":{}});
+    let compiled = compile_ui_contract(&serde_json::to_vec(&contract).unwrap()).unwrap();
+    for cursor in [Value::Null, json!("YQ"), json!("a".repeat(2731))] {
+        compiled
+            .validate_response("test.page", &json!({"contracts":[],"nextCursor":cursor}))
+            .unwrap();
+    }
+    for cursor in ["".to_owned(), "a".repeat(2732), "+/8=.YWJjZA==".into()] {
+        assert!(
+            compiled
+                .validate_response("test.page", &json!({"contracts":[],"nextCursor":cursor}))
+                .is_err()
+        );
+    }
+}

@@ -11,11 +11,11 @@ The Backend serves HTTP/1.1 on `127.0.0.1:<saved-port>`. It starts disabled. All
 - `GET /v1/contracts/{contract}/{major}/guide`: live Provider guide.
 - `POST /v1/call`: closed `{contract, major, port, request}` body, `{result: <original JSON value>}` response.
 
-Only ordinary queries and their required guide can be selected. Commands, streaming queries, events and Conversations are refused. Each current Host selection, Provider, major and canonical schema fingerprint must still match. Description-only edits preserve selections. Added tools stay off. Tokens share exact scope but are independently revocable. The Host derives the current Person; clients cannot choose an actor, Provider or Workspace. A read already authorized may finish.
+Only ordinary queries and their required guide can be selected. Commands, streaming queries, events and Conversations are refused. Each current Host selection, Provider, major and canonical schema fingerprint must still match. Description-only edits preserve selections. Added tools stay off. Tokens share exact scope but are independently revocable. The Host derives the current Person; clients cannot choose an actor, Provider or Workspace. A read that passed final local admission may still be sent to the Host and finish after a later policy change succeeds, even if it was waiting inside the SDK.
 
 ## Durable configuration
 
-Private `config/state.json` uses configVersion 1, a 0700 subdirectory and owned 0600 regular files. Descriptor-relative no-follow opens, file fsync, atomic rename and directory fsync protect writes. Invalid, future or unsafe files remain unchanged and fail closed. Limits: 1 MiB, 256 selected contracts, 1,024 selected tools, 32 tokens, 96 UTF-8 label bytes. No plaintext credential is persisted. `eg1.<id>.<secret>` uses 16 random ID bytes and 32 random secret bytes, base64url without padding. Verifiers hash `external-gateway.token.v1\0`, ID bytes, generation as big-endian u64, and secret bytes, with SHA-256 and constant-time comparison.
+Private `config/state.json` uses configVersion 1, a 0700 subdirectory and owned 0600 regular files. Descriptor-relative no-follow opens, file fsync, atomic rename and directory fsync protect writes. Invalid, future or unsafe committed files remain unchanged and fail closed. Before a serialized write, an abandoned owned 0600 regular `state.tmp` is discarded; its contents are never promoted. Opening or reading alone never reclaims it. Recovery relies on one live Backend generation per supplied Data Directory and the policy transaction retaining exclusive write ownership after observer cancellation. Unsafe temporary paths fail closed rather than being replaced. Limits: 1 MiB, 256 selected contracts, 1,024 selected tools, 32 tokens, 96 UTF-8 label bytes. No plaintext credential is persisted. `eg1.<id>.<secret>` uses 16 random ID bytes and 32 random secret bytes, base64url without padding. Verifiers hash `external-gateway.token.v1\0`, ID bytes, generation as big-endian u64, and secret bytes, with SHA-256 and constant-time comparison.
 
 A failed persistence operation never reports success. An uncertain operation rereads storage and keeps access closed. Pending denials are retained in memory until a successful durable user action reconciles them. Removal retains data. Disable and revoke all before removal if retained access is unwanted. Native code running as the same OS user is outside this protection boundary.
 
@@ -29,6 +29,8 @@ Timeout and interval values are seconds; byte values are bytes. The schema and R
 | `MAX_HEADER_BYTES` | 16384 |
 | `MAX_HEADERS` | 64 |
 | `MAX_TARGET_BYTES` | 4096 |
+| `MAX_HOST_CURSOR_BYTES` | 2048 |
+| `MAX_HTTP_CURSOR_CHARS` | 2731 |
 | `REQUEST_READ_TIMEOUT` | 5 |
 | `RESPONSE_WRITE_TIMEOUT` | 5 |
 | `REQUESTS_PER_SECOND` | 8 |
@@ -62,7 +64,7 @@ Timeout and interval values are seconds; byte values are bytes. The schema and R
 
 POST accepts exactly `application/json`, without a content encoding. The serialized original `request` and result each have a 256 KiB budget. The surrounding call envelope has an additional 4 KiB allowance. Schema responses retain complete reachable definitions and never truncate a successful document. A guide whose complete preface and original Markdown exceed the value budget plus allowance is refused with `too_large`, never truncated. Metadata cache capacity is 16 MiB of serialized documents, using least-recently-used eviction. A hit still requires current offered metadata/revision and current exact policy. Cached compilation has bounded nonwaiting admission; cancelled observers do not release its blocking-work permit early.
 
-A catalog page can be empty while `nextCursor` is non-null. Continue with that opaque base64url cursor. Invalid or stale caller cursors are refused. Internal contract lookup restarts a stale catalog at most once. No invocation is replayed after a stale revision. Disabled or stale-schema contracts expose neither schemas nor summaries.
+A catalog page can be empty while `nextCursor` is non-null. Pass that exact opaque cursor as `?cursor=<nextCursor>` without decoding it. HTTP wraps the unchanged opaque Host cursor in canonical base64url without padding: at most 2,731 ASCII characters encoding at most 2,048 UTF-8 bytes. The UI/Host cursor is not changed, and the request target remains limited to 4,096 bytes. Malformed, empty, noncanonical or oversized envelopes are refused before catalog dispatch; a valid envelope containing a stale Host cursor preserves `port_catalog_changed`. Internal contract lookup restarts a stale catalog at most once. No invocation is replayed after a stale revision. Disabled or stale-schema contracts expose neither schemas nor summaries.
 
 ## Refusals and transport policy
 
@@ -96,7 +98,7 @@ The 25-second HTTP budget is an upper observation ceiling. Earlier Host, SDK and
 
 First enable binds an IPv4 ephemeral port, durably saves it and desired enabled state, then publishes running status. Status `running` plus saved `port` identifies `http://127.0.0.1:<port>/v1`; no URL is published before persistence. Later activation/recovery binds only the saved port. A conflict leaves desired setup intact with `listener_bind_failed` and no running endpoint. An explicit port change closes the old endpoint and publishes the new one only after bind and durable commit; failure leaves stopped/error state, not an uncommitted URL. UI hiding does not change listener lifetime.
 
-Authorization is checked again after metadata and slot admission, immediately before the owned SDK call starts. Successful disable/revoke/regenerate prevents later affected authorization. Already-authorized reads may finish. Tokens and desired setup survive restart/reinstall unless explicitly disabled/revoked.
+Authorization is checked again after metadata and slot acquisition at final gateway local admission. Successful disable/revoke/regenerate prevents later affected admission under the old policy. A read already admitted may still be sent to the Host and finish afterward, including a read waiting inside the SDK before transport enqueue. The first SDK poll is not an enqueue receipt. Revocation does not cancel admitted reads or promise immediate cessation of Provider work. Use the external agent's own stop control to stop its work. Tokens and desired setup survive restart/reinstall unless explicitly disabled/revoked.
 
 Membership is an additional listener gate, independent of lifecycle-active and desired-enabled. The activation-owned `teamarness.membership` 1.0 watcher binds the local Installation and Workspace, reads the typed current roster, subscribes with `afterEpoch`, then revalidates. Durable catch-up covers the read/subscribe gap. Every notification invalidates admission before a sequential fresh roster lookup; event digests never identify the removed member. One credit-controlled subscription and one snapshot path are separate from the 12 ordinary SDK-operation slots. Snapshots retain ownership through the SDK's existing terminal/deadline; there is no polling or automatic reconnect loop.
 

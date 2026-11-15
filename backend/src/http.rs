@@ -1,5 +1,6 @@
 //! HTTP/1 application surface. Hyper owns parsing/framing; policy owns authority.
 use crate::{error, limits::*, policy::Policy};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::{Request, Response, body::Incoming, server::conn::http1, service::service_fn};
@@ -188,22 +189,31 @@ async fn handle(
                 Some(q) => {
                     let c = q
                         .strip_prefix("cursor=")
-                        .filter(|c| {
-                            !c.is_empty()
-                                && c.len() <= 2048
-                                && c.bytes()
-                                    .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
-                        })
+                        .filter(|c| !c.is_empty() && c.len() <= MAX_HTTP_CURSOR_CHARS)
                         .ok_or_else(|| error("bad_request"))?;
-                    Some(c)
+                    let bytes = URL_SAFE_NO_PAD
+                        .decode(c)
+                        .map_err(|_| error("bad_request"))?;
+                    if bytes.is_empty() || bytes.len() > MAX_HOST_CURSOR_BYTES {
+                        return Err(error("bad_request"));
+                    }
+                    Some(String::from_utf8(bytes).map_err(|_| error("bad_request"))?)
                 }
             };
-            tokio::time::timeout(
+            let mut page = tokio::time::timeout(
                 Duration::from_secs(CATALOG_READ_TIMEOUT as u64),
-                policy.external_page(&bearer, cursor),
+                policy.external_page(&bearer, cursor.as_deref()),
             )
             .await
-            .map_err(|_| error("timeout"))?
+            .map_err(|_| error("timeout"))??;
+            // The Host/UI cursor stays opaque and unchanged below this HTTP boundary.
+            if let Some(next) = page["nextCursor"].as_str() {
+                if next.is_empty() || next.len() > MAX_HOST_CURSOR_BYTES {
+                    return Err(error("unavailable"));
+                }
+                page["nextCursor"] = URL_SAFE_NO_PAD.encode(next.as_bytes()).into();
+            }
+            Ok(page)
         }
         _ => {
             let parts: Vec<_> = path.split('/').collect();

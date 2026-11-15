@@ -210,10 +210,13 @@ impl FileStore {
         config.validate()?;
         Ok(config)
     }
-    /// Call under the policy's serialized owner. Errors never acknowledge authorization.
+    /// Call under the policy's serialized owner, with one live Backend generation per
+    /// Data Directory. Opening/reading never reclaims a possibly live writer's temporary file.
+    /// Errors never acknowledge authorization.
     pub fn write(&self, config: &Config) -> Result<(), StorageError> {
         config.validate()?;
         self.read()?; // Refuse to overwrite unsafe or unrecognized existing state.
+        self.discard_abandoned_temp()?;
         let bytes = io(serde_json::to_vec(config))?;
         let fd = io(sys::openat(
             &self.directory,
@@ -243,6 +246,27 @@ impl FileStore {
             let _ = sys::unlinkat(&self.directory, "state.tmp", sys::AtFlags::empty());
         }
         result
+    }
+    fn discard_abandoned_temp(&self) -> Result<(), StorageError> {
+        // The serialized write owner outlives cancelled observers, and the Host retires
+        // the prior process before replacement. Only here can state.tmp be abandoned.
+        // Its contents are never read or promoted, even when committed state is missing.
+        let file: File = match sys::openat(
+            &self.directory,
+            "state.tmp",
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
+            Mode::empty(),
+        ) {
+            Ok(fd) => fd.into(),
+            Err(rustix::io::Errno::NOENT) => return Ok(()),
+            Err(_) => return Err(StorageError::Unsafe),
+        };
+        owned(&file, false)?;
+        io(sys::unlinkat(
+            &self.directory,
+            "state.tmp",
+            sys::AtFlags::empty(),
+        ))
     }
     fn stage(&self, stage: WriteStage) -> Result<(), StorageError> {
         self.fault.before(stage).map_err(|_| StorageError::Io)

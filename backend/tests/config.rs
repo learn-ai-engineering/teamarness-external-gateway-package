@@ -225,3 +225,86 @@ fn duplicate_selection_keys_are_malformed_and_preserved() {
     assert!(store.write(&Config::default()).is_err());
     assert_eq!(fs::read_to_string(file).unwrap(), content);
 }
+
+#[test]
+fn abandoned_temp_is_discarded_without_promoting_or_parsing_its_contents() {
+    for contents in [
+        b"uncommitted partial JSON".to_vec(),
+        vec![0; 1024 * 1024 + 1],
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().canonicalize().unwrap();
+        let store = FileStore::open(&path).unwrap();
+        let temp = path.join("config/state.tmp");
+        fs::write(&temp, contents).unwrap();
+        fs::set_permissions(&temp, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(!store.read().unwrap().desired_enabled);
+        assert!(temp.exists());
+        let next = Config {
+            port: Some(43210),
+            ..Config::default()
+        };
+        store.write(&next).unwrap();
+        assert!(!temp.exists());
+        assert_eq!(store.read().unwrap().port, Some(43210));
+        assert_eq!(
+            fs::metadata(path.join("config/state.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+}
+
+#[test]
+fn unsafe_temp_paths_and_invalid_committed_state_are_preserved() {
+    for kind in [
+        "symlink",
+        "directory",
+        "hardlink",
+        "mode",
+        "fifo",
+        "committed-invalid",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().canonicalize().unwrap();
+        let store = FileStore::open(&path).unwrap();
+        store.write(&Config::default()).unwrap();
+        let committed = path.join("config/state.json");
+        let temp = path.join("config/state.tmp");
+        match kind {
+            "symlink" => symlink(&committed, &temp).unwrap(),
+            "directory" => fs::create_dir(&temp).unwrap(),
+            "hardlink" => fs::hard_link(&committed, &temp).unwrap(),
+            "fifo" => assert!(
+                std::process::Command::new("mkfifo")
+                    .args(["-m", "600"])
+                    .arg(&temp)
+                    .status()
+                    .unwrap()
+                    .success()
+            ),
+            _ => {
+                fs::write(&temp, "uncommitted").unwrap();
+                fs::set_permissions(
+                    &temp,
+                    fs::Permissions::from_mode(if kind == "mode" { 0o644 } else { 0o600 }),
+                )
+                .unwrap();
+            }
+        }
+        if kind == "committed-invalid" {
+            fs::write(&committed, "invalid").unwrap();
+        }
+        let before = fs::read(&committed).unwrap();
+        let temp_before = fs::symlink_metadata(&temp).unwrap();
+        assert!(store.write(&Config::default()).is_err(), "{kind}");
+        assert_eq!(fs::read(&committed).unwrap(), before);
+        use std::os::unix::fs::MetadataExt;
+        let temp_after = fs::symlink_metadata(&temp).unwrap();
+        assert_eq!(temp_after.ino(), temp_before.ino(), "{kind}");
+        assert_eq!(temp_after.mode(), temp_before.mode(), "{kind}");
+    }
+}

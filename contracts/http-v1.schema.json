@@ -215,7 +215,9 @@
             },
             {
               "type": "string",
-              "maxLength": 2048
+              "maxLength": 2731,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_-]+$"
             }
           ]
         }
@@ -321,7 +323,9 @@
     "MAX_CATALOG_RESTARTS": 1,
     "CATALOG_POLL_INTERVAL": 5,
     "CATALOG_READ_TIMEOUT": 5,
-    "LISTENER_DRAIN_TIMEOUT": 5
+    "LISTENER_DRAIN_TIMEOUT": 5,
+    "MAX_HOST_CURSOR_BYTES": 2048,
+    "MAX_HTTP_CURSOR_CHARS": 2731
   },
   "x-gateway-status": {
     "unauthorized": 401,
