@@ -1,0 +1,33 @@
+[workspace]
+members = [
+    "backend",
+    "vendor/teamarness/package-contract",
+    "vendor/teamarness/package-protocol",
+    "vendor/teamarness/package-sdk",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.99.1"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
+jsonschema = { version = "=0.56.0", default-features = false }
+mime = "=0.3.17"
+semver = "=1.0.28"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+sha2 = { version = "=0.11.0", default-features = false, features = ["alloc"] }
+tempfile = "=3.27.0"
+tokio = { version = "=1.53.1", default-features = false, features = ["macros", "rt", "rt-multi-thread", "sync", "time", "process", "io-util", "fs", "net"] }
+
+getrandom = { version = "=0.4.3", default-features = false, features = ["std"] }
+subtle = { version = "=2.6.1", default-features = false }
+rustix = { version = "=1.1.4", default-features = false, features = ["std", "fs", "process"] }
+hyper = { version = "=1.11.1", default-features = false, features = ["server", "http1"] }
+hyper-util = { version = "=0.1.20", default-features = false, features = ["tokio"] }
+http-body-util = { version = "=0.1.5", default-features = false }
+http = { version = "=1.5.0", default-features = false }
+bytes = { version = "=1.12.1", default-features = false }

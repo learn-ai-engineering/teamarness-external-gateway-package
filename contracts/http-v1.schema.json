@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "External Gateway HTTP v1 contract definitions (transport implementation follows in phase 4)",
+  "$defs": {
+    "call": {
+      "type": "object",
+      "required": [
+        "contract",
+        "major",
+        "port",
+        "request"
+      ],
+      "properties": {
+        "contract": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "major": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "port": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "request": {}
+      },
+      "additionalProperties": false
+    }
+  },
+  "x-limits": {
+    "MAX_CONNECTIONS": 32,
+    "MAX_HEADER_BYTES": 16384,
+    "MAX_HEADERS": 64,
+    "MAX_TARGET_BYTES": 4096,
+    "REQUEST_READ_TIMEOUT": 5,
+    "RESPONSE_WRITE_TIMEOUT": 5,
+    "REQUESTS_PER_SECOND": 8,
+    "REQUEST_BURST": 16,
+    "MAX_HOST_CALLS": 4,
+    "TOOL_WAIT_TIMEOUT": 25,
+    "PORT_VALUE_BYTES": 262144,
+    "ENVELOPE_ALLOWANCE_BYTES": 4096,
+    "METADATA_BYTES": 1048576,
+    "METADATA_CHUNK_BYTES": 65536,
+    "SUMMARY_ROWS": 32,
+    "SUMMARY_BYTES": 32768,
+    "METADATA_CACHE_BYTES": 16777216,
+    "MAX_CATALOG_RESTARTS": 1,
+    "CATALOG_POLL_INTERVAL": 5,
+    "CATALOG_READ_TIMEOUT": 5,
+    "LISTENER_DRAIN_TIMEOUT": 5
+  }
+}

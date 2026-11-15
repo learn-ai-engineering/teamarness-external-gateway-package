@@ -1,0 +1,22 @@
+//! Protocol budgets. Timeout and interval values are seconds. HTTP enforces these in phase 4.
+pub const MAX_CONNECTIONS: usize = 32;
+pub const MAX_HEADER_BYTES: usize = 16384;
+pub const MAX_HEADERS: usize = 64;
+pub const MAX_TARGET_BYTES: usize = 4096;
+pub const REQUEST_READ_TIMEOUT: usize = 5;
+pub const RESPONSE_WRITE_TIMEOUT: usize = 5;
+pub const REQUESTS_PER_SECOND: usize = 8;
+pub const REQUEST_BURST: usize = 16;
+pub const MAX_HOST_CALLS: usize = 4;
+pub const TOOL_WAIT_TIMEOUT: usize = 25;
+pub const PORT_VALUE_BYTES: usize = 262144;
+pub const ENVELOPE_ALLOWANCE_BYTES: usize = 4096;
+pub const METADATA_BYTES: usize = 1048576;
+pub const METADATA_CHUNK_BYTES: usize = 65536;
+pub const SUMMARY_ROWS: usize = 32;
+pub const SUMMARY_BYTES: usize = 32768;
+pub const METADATA_CACHE_BYTES: usize = 16777216;
+pub const MAX_CATALOG_RESTARTS: usize = 1;
+pub const CATALOG_POLL_INTERVAL: usize = 5;
+pub const CATALOG_READ_TIMEOUT: usize = 5;
+pub const LISTENER_DRAIN_TIMEOUT: usize = 5;

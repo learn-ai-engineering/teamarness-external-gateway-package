@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "identity": "dev.teamarness.external-gateway",
+  "version": "1.0.0",
+  "presentation": {
+    "displayName": "External Gateway",
+    "description": "Person-authorized, explicitly selected read-only Workspace access for external clients."
+  },
+  "protocol": {
+    "major": 1,
+    "minMinor": 0,
+    "maxMinor": 0
+  },
+  "backends": [
+    {
+      "target": "aarch64-apple-darwin",
+      "path": "backend/teamarness-generated-package-backend-aarch64-apple-darwin",
+      "size": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "ui": {
+    "entrypoint": {
+      "path": "ui/index.js",
+      "size": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "assets": [],
+    "contract": {
+      "path": "ui/contract.json",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "views": [
+      "settings"
+    ]
+  },
+  "capabilities": [
+    {
+      "identity": "teamarness.workspace-context",
+      "major": 1,
+      "minMinor": 0,
+      "maxMinor": 0
+    },
+    {
+      "identity": "teamarness.package-ports",
+      "major": 3,
+      "minMinor": 0,
+      "maxMinor": 0
+    }
+  ]
+}

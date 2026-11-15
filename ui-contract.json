@@ -1,0 +1,664 @@
+{
+  "schemaVersion": 1,
+  "$defs": {
+    "Token": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 22
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "generation"
+      ],
+      "additionalProperties": false
+    },
+    "ObservedContract": {
+      "type": "object",
+      "properties": {
+        "contract": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "major": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      },
+      "required": [
+        "contract",
+        "major"
+      ],
+      "additionalProperties": false
+    },
+    "Status": {
+      "type": "object",
+      "properties": {
+        "desiredEnabled": {
+          "type": "boolean"
+        },
+        "port": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "storageFailed": {
+          "type": "boolean"
+        },
+        "warning": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tokens": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Token"
+          },
+          "maxItems": 32
+        },
+        "selectedContracts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 256
+        },
+        "selectedTools": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1024
+        }
+      },
+      "required": [
+        "desiredEnabled",
+        "port",
+        "running",
+        "storageFailed",
+        "warning",
+        "tokens",
+        "selectedContracts",
+        "selectedTools"
+      ],
+      "additionalProperties": false
+    },
+    "Contract": {
+      "type": "object",
+      "properties": {
+        "contract": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "major": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "displayName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "hostEnabled": {
+          "type": "boolean"
+        },
+        "selected": {
+          "type": "boolean"
+        },
+        "guideEligibility": {
+          "enum": [
+            "eligible",
+            "missing",
+            "unavailable"
+          ]
+        },
+        "excluded": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "contract",
+        "major",
+        "provider",
+        "displayName",
+        "available",
+        "hostEnabled",
+        "selected",
+        "guideEligibility",
+        "excluded"
+      ],
+      "additionalProperties": false
+    },
+    "Tool": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "eligible": {
+          "type": "boolean"
+        },
+        "selected": {
+          "type": "boolean"
+        },
+        "reviewRequired": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "port",
+        "fingerprint",
+        "eligible",
+        "selected",
+        "reviewRequired"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "requests": {
+    "external-gateway.status.get": {
+      "request": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "response": {
+        "$ref": "#/$defs/Status"
+      }
+    },
+    "external-gateway.catalog.page": {
+      "request": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "contract": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 256
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "response": {
+        "type": "object",
+        "properties": {
+          "contracts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Contract"
+            },
+            "maxItems": 32
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Tool"
+            },
+            "maxItems": 32
+          },
+          "nextOffset": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "contracts",
+          "nextCursor",
+          "tools",
+          "nextOffset"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "external-gateway.listener.set": {
+      "request": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "response": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "warning"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "external-gateway.port.set": {
+      "request": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        },
+        "required": [
+          "port"
+        ],
+        "additionalProperties": false
+      },
+      "response": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "warning"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "external-gateway.package.set": {
+      "request": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "contracts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/ObservedContract"
+            },
+            "maxItems": 256
+          }
+        },
+        "required": [
+          "provider",
+          "enabled",
+          "contracts"
+        ],
+        "additionalProperties": false
+      },
+      "response": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "warning"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "external-gateway.tool.set": {
+      "request": {
+        "type": "object",
+        "properties": {
+          "contract": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "major": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "provider": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "port": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "contract",
+          "major",
+          "provider",
+          "port",
+          "fingerprint",
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "response": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "warning"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "external-gateway.token.create": {
+      "request": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "additionalProperties": false
+      },
+      "response": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 22
+          },
+          "bearer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 70
+          }
+        },
+        "required": [
+          "id",
+          "bearer"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "external-gateway.token.regenerate": {
+      "request": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 22
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "response": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 22
+          },
+          "bearer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 70
+          }
+        },
+        "required": [
+          "id",
+          "bearer"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "external-gateway.token.revoke": {
+      "request": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 22
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "response": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "warning"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "external-gateway.disable-and-revoke-all": {
+      "request": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "response": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "warning"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "subscriptions": {
+    "external-gateway.status.watch": {
+      "request": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "event": {
+        "$ref": "#/$defs/Status"
+      }
+    }
+  }
+}

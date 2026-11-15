@@ -1,0 +1,92 @@
+#![forbid(unsafe_code)]
+//! Standalone Person-authorized read policy. HTTP transport is a later phase.
+pub mod catalog;
+pub mod config;
+pub mod limits;
+pub mod policy;
+pub mod tokens;
+use policy::{Change, Policy};
+use serde::Deserialize;
+use serde_json::{Value, json};
+use std::sync::Arc;
+use teamarness_package_sdk::{BackendError, Context, Empty, Router, event_channel};
+
+pub fn error(code: &str) -> BackendError {
+    BackendError::new(format!("external_gateway.{code}"), false, json!({}))
+}
+pub struct State {
+    pub policy: Arc<Policy>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Enabled {
+    enabled: bool,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Port {
+    port: u16,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Label {
+    label: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Id {
+    id: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Page {
+    cursor: Option<String>,
+    contract: Option<String>,
+    #[serde(default)]
+    offset: usize,
+}
+
+pub fn router() -> Router<State> {
+    router_with_entropy(Arc::new(tokens::OsEntropy))
+}
+pub fn router_with_entropy(entropy: Arc<dyn tokens::Entropy>) -> Router<State> {
+    router_with_storage_fault(entropy, None)
+}
+pub fn router_with_storage_fault(
+    entropy: Arc<dyn tokens::Entropy>,
+    fault: Option<Arc<dyn config::StorageFault>>,
+) -> Router<State> {
+    Router::new(move |activation| {
+        let path=activation.data_directory().to_owned();let entropy=entropy.clone();let fault=fault.clone();
+        let client=teamarness_package_sdk::ports_v3::PortClientV3::from_initialization(activation.initialization(),activation.capabilities().clone());
+        async move {
+            let client=client?;
+            let store=tokio::task::spawn_blocking(move||config::FileStore::open(&path).map(|store|match fault {Some(f)=>store.with_fault(f),None=>store})).await.map_err(|_|error("storage_failed"))?.map_err(|_|error("storage_failed"))?;
+            let policy=Policy::open(store,catalog::Catalog::new(client),entropy).await?;
+            Ok(State{policy})
+        }
+    })
+    .on_suspend(|s:Arc<State>|async move{s.policy.suspend().await;Ok(())})
+    .on_dispose(|s:Arc<State>|async move{s.policy.suspend().await;Ok(())})
+    .on_resume(|s:Arc<State>|async move{s.policy.resume();Ok(())})
+    .request("external-gateway.status.get",|c:Context<State>,_:Empty|async move{Ok(c.state().policy.status())})
+    .request("external-gateway.catalog.page",|c:Context<State>,p:Page|async move{c.state().policy.catalog_page(p.cursor.as_deref(),p.contract.as_deref(),p.offset).await})
+    .request("external-gateway.listener.set",|c:Context<State>,p:Enabled|async move{c.state().policy.change(Change::Listener(p.enabled)).await})
+    .request("external-gateway.port.set",|c:Context<State>,p:Port|async move{c.state().policy.change(Change::Port(p.port)).await})
+    .request("external-gateway.package.set",|c:Context<State>,p:policy::PackageChange|async move{c.state().policy.change(Change::Package(p)).await})
+    .request("external-gateway.tool.set",|c:Context<State>,p:policy::ToolChange|async move{c.state().policy.change(Change::Tool(p)).await})
+    .request("external-gateway.token.create",|c:Context<State>,p:Label|async move{c.state().policy.change(Change::Create(p.label)).await})
+    .request("external-gateway.token.regenerate",|c:Context<State>,p:Id|async move{c.state().policy.change(Change::Regenerate(p.id)).await})
+    .request("external-gateway.token.revoke",|c:Context<State>,p:Id|async move{c.state().policy.change(Change::Revoke(p.id)).await})
+    .request("external-gateway.disable-and-revoke-all",|c:Context<State>,_:Empty|async move{c.state().policy.change(Change::DisableAll).await})
+    .subscription("external-gateway.status.watch",|c:Context<State>,_:Empty|async move{
+        let (sender,stream)=event_channel(1);let mut status=c.state().policy.watch();let cancel=c.cancellation().clone();
+        tokio::spawn(async move{
+            loop {
+                let value:Value=status.borrow_and_update().clone();
+                tokio::select! { _=cancel.cancelled()=>break,result=sender.send(value)=>{if result.is_err(){break;}} }
+                tokio::select! { _=cancel.cancelled()=>break,_=sender.closed()=>break,result=status.changed()=>{if result.is_err(){break;}} }
+            }
+        });Ok(stream)
+    })
+}
