@@ -33,7 +33,7 @@ Package UI
 
 `ui-contract.json` defines the requests that may cross this path. Treat it as the shared boundary between the UI and Backend. Change the contract before implementing a new request on either side.
 
-This Package consumes only `teamarness.workspace-context` 1.0 and `teamarness.package-ports` 3.0. It has eager activation, main and settings views, closed typed configuration requests and `external-gateway.status.watch`. It provides no Ports and declares no known consumed Ports. It targets `aarch64-apple-darwin`. The Backend serves bounded authenticated IPv4 HTTP; the UI remains a minimal status view, not the completed settings experience.
+This Package consumes only `teamarness.workspace-context` 1.0 and `teamarness.package-ports` 3.0. It has eager activation, main and settings views, closed typed configuration requests and `external-gateway.status.watch`. It provides no Ports and declares no known consumed Ports. It targets `aarch64-apple-darwin`. The Backend serves bounded authenticated IPv4 HTTP; the UI provides main/settings views, bounded catalog controls, one-time tokens and secret-free onboarding.
 
 ## Project map
 
@@ -229,4 +229,4 @@ Do not claim synchronization, team sharing, sandboxing, another target platform,
 
 One owned policy transaction outlives cancelled UI observers. Failed authorization writes reread storage, keep access closed and retain only the intersection of old and requested authority until a successful durable action reconciles state. A later unrelated mutation must not resurrect a requested revocation or publish a failed enable. Invalid configuration is never overwritten. File fault tests use real files at write/fsync/rename/directory-fsync boundaries.
 
-Phase 4 implements bounded HTTP, first-port bind/persist/publication and listener lifecycle. Twelve slots count outstanding local SDK operations, including guides; every SDK terminal releases a slot. Observer loss alone does not. No Host settlement tracking or quarantine. Phase 5 owns complete settings and onboarding presentation. Final real-Host qualification and Don-owned M1–M5 remain pending.
+Phase 4 implements bounded HTTP, first-port bind/persist/publication and listener lifecycle. Twelve slots count outstanding local SDK operations, including guides; every SDK terminal releases a slot. Observer loss alone does not. No Host settlement tracking or quarantine. Phase 5 implements complete settings and shared onboarding presentation. `docs/onboarding.md` is bundled into UI and Backend; never add credentials to it. Catalog UI retains only one summary/tool page and has at most one refresh. Null-provider package changes are disable-only for exact currently unavailable contracts; saved Provider identities are presentation/grouping, never authorization. Final real-Host qualification and Don-owned M1–M5 remain pending.

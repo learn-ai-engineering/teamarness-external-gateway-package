@@ -385,9 +385,16 @@
         "type": "object",
         "properties": {
           "provider": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "enabled": {
             "type": "boolean"

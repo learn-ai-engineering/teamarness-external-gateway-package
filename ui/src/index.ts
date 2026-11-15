@@ -1,62 +1,77 @@
-import {
-  adoptPackageStyles,
-  describePackageError,
-  isAbortError,
-  typedPackageClient,
-  type PackageMountContext,
-  type PackageUnmount,
-} from "@teamarness/package-ui-sdk";
-
-import type { PackageContract } from "./contract.generated";
+import { adoptPackageStyles, describePackageError, isAbortError, typedPackageClient, type PackageMountContext, type PackageSubscription, type PackageUnmount } from "@teamarness/package-ui-sdk";
+import type { PackageContract, Status } from "./contract.generated";
 import { PACKAGE_STYLES } from "./styles";
+import { action, node } from "./dom";
+import { settings } from "./settings";
+import onboarding from "../../docs/onboarding.md?raw";
 
-/**
- * Mounts the Package UI.
- *
- * It returns its unmount synchronously, before the first request answers, so the Shell can take
- * the mount down while a request is still in flight.
- */
+/** Mount lifetime is independent of Backend listener lifetime. */
 export function mount(context: PackageMountContext): PackageUnmount {
   const client = typedPackageClient<PackageContract>(context.client);
   const cleanupStyles = adoptPackageStyles(context.root, PACKAGE_STYLES);
-
-  const article = document.createElement("article");
-  const heading = document.createElement("h1");
-  heading.textContent = context.package.displayName;
-  const message = document.createElement("p");
-  message.textContent = "Loading…";
-  const reads = document.createElement("p");
-  reads.className = "reads";
-  article.append(heading, message, reads);
+  const article = node("article");
+  const nav = node("nav"); nav.setAttribute("aria-label", "Gateway views");
+  const statusArea = node("section", "Loading…"); statusArea.setAttribute("aria-live", "polite");
+  const errorArea = node("p"); errorArea.setAttribute("role", "alert");
+  const content = node("section");
+  article.append(node("h1", context.package.displayName), node("p", `Workspace: ${context.workspace.name} (${context.workspace.id})`), node("p", "Read-only · Person-authorized access"), nav, statusArea, errorArea, content);
   context.root.append(article);
-
+  let alive = true;
+  let view = context.view;
+  let revision = 0;
+  let status: Status | undefined;
+  let subscription: PackageSubscription | undefined;
   const pending = new AbortController();
-  let unmounted = false;
-
-  const fail = (error: unknown): void => {
-    if (unmounted || isAbortError(error)) return;
-    message.textContent = "";
-    const alert = document.createElement("p");
-    alert.className = "error";
-    alert.setAttribute("role", "alert");
-    alert.textContent = describePackageError(error);
-    article.append(alert);
+  let stopView = () => {};
+  let updateView: (value: Status) => void = () => {};
+  const fail = (error: unknown) => {
+    if (alive && !isAbortError(error)) errorArea.textContent = describePackageError(error);
   };
-
-  void client
-    .request("external-gateway.status.get", {}, { signal: pending.signal })
-    .then((response) => {
-      if (unmounted) return;
-      message.textContent = response.desiredEnabled ? "Read-only access configured" : "Read-only access disabled";
-      reads.textContent = `${response.tokens.length} tokens. ${response.running && response.port ? `http://127.0.0.1:${response.port}/v1` : "HTTP listener stopped."}`;
-    })
-    .catch(fail);
-
+  const showStatus = (value: Status) => {
+    status = value;
+    statusArea.replaceChildren(
+      node("p", `Desired access: ${value.desiredEnabled ? "enabled" : "disabled"}. ${value.running ? "Listener running" : "Listener stopped"}.`),
+      node("p", `Saved port: ${value.port ?? "not allocated"}. ${value.tokens.length} tokens; ${value.selectedContracts} contracts; ${value.selectedTools} tools selected.`),
+    );
+    if (value.running && value.port) statusArea.append(node("code", `http://127.0.0.1:${value.port}/v1`));
+    if (value.storageFailed) statusArea.append(node("p", "Storage failed. Access is closed until a durable action reconciles state."));
+    if (value.warning) statusArea.append(node("p", value.warning));
+    updateView(value);
+  };
+  const renderView = () => {
+    stopView(); updateView = () => {}; content.replaceChildren(); nav.replaceChildren();
+    for (const name of ["main", "settings"] as const) {
+      const button = action(name === "main" ? "Overview" : "Settings", () => { if (view !== name) { view = name; renderView(); } });
+      if (view === name) button.setAttribute("aria-current", "page");
+      nav.append(button);
+    }
+    if (view === "main") {
+      content.append(node("h2", "External-agent onboarding"), node("p", "Give the running URL to your outside client. Supply a token separately through its local secret mechanism. Save these instructions without credentials."), node("pre", onboarding));
+      stopView = () => {};
+    } else {
+      const mounted = settings(content, client, status, refreshStatus);
+      stopView = mounted.stop;
+      updateView = mounted.update;
+    }
+  };
+  function refreshStatus() {
+    const requestedRevision = ++revision;
+    void client.request("external-gateway.status.get", {}, { signal: pending.signal }).then(value => {
+      if (alive && revision === requestedRevision) showStatus(value);
+    }).catch(fail);
+  }
+  renderView();
+  refreshStatus();
+  void client.subscribe("external-gateway.status.watch", {}, value => {
+    if (alive) { revision++; showStatus(value); }
+  }, { onTerminated: error => { if (alive) { if (error) fail(error); else errorArea.textContent = "Status updates ended. Reopen the view to reconnect."; } } }).then(stream => {
+    if (alive) subscription = stream;
+    else void stream.close().catch(() => undefined);
+  }).catch(fail);
   return () => {
-    if (unmounted) return;
-    unmounted = true;
-    pending.abort();
-    article.remove();
-    cleanupStyles();
+    if (!alive) return;
+    alive = false; pending.abort(); stopView(); status = undefined;
+    void subscription?.close().catch(() => undefined);
+    article.remove(); cleanupStyles();
   };
 }

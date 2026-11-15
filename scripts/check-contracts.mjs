@@ -30,3 +30,14 @@ for(const example of JSON.parse(read("../contracts/http-v1.examples.json")))asse
 assert.ok(docs.includes("Every SDK terminal releases the local slot"));
 assert.ok(docs.includes("25-second HTTP budget"));
 console.log("HTTP envelope definitions, examples, documented status codes and invocation budgets match.");
+
+const onboarding=read("../docs/onboarding.md");
+assert.ok(onboarding.includes(`${limits.MAX_HOST_CALLS} outstanding gateway SDK operations`));
+assert.ok(onboarding.includes(`${limits.TOOL_WAIT_TIMEOUT}-second upper HTTP observation budget`));
+assert.ok(onboarding.includes("at most one delayed retry"));
+assert.ok(onboarding.includes("Never retry an uncertain outcome"));
+assert.ok(onboarding.includes("<BEARER>"));
+const catalogUi=read("../ui/src/catalog.ts");
+assert.ok(catalogUi.includes(`const POLL_MS = ${limits.CATALOG_POLL_INTERVAL*1000};`));
+assert.ok(catalogUi.includes(`const READ_MS = ${limits.CATALOG_READ_TIMEOUT*1000};`));
+console.log("Shared onboarding and settings deadlines match the accepted budgets.");

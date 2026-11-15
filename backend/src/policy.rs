@@ -37,7 +37,7 @@ pub struct ContractChoice {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PackageChange {
-    pub provider: String,
+    pub provider: Option<String>,
     pub enabled: bool,
     pub contracts: Vec<ContractChoice>,
 }
@@ -332,15 +332,65 @@ impl Policy {
                 ok()
             }
             Change::Package(change) => {
-                if !change.enabled {
+                if change.provider.is_none() {
+                    if change.enabled || change.contracts.is_empty() || change.contracts.len() > 256
+                    {
+                        return Err(error("bad_request"));
+                    }
+                    let mut requested = BTreeMap::new();
+                    for choice in &change.contracts {
+                        if choice.major == 0
+                            || requested
+                                .insert(choice.contract.clone(), choice.major)
+                                .is_some()
+                        {
+                            return Err(error("bad_request"));
+                        }
+                    }
+                    tokio::time::timeout(
+                        std::time::Duration::from_secs(crate::limits::CATALOG_READ_TIMEOUT as u64),
+                        async {
+                            let mut cursor = None;
+                            loop {
+                                let page = self.catalog.page(cursor.as_deref()).await?;
+                                for row in page.contracts {
+                                    if let Some(major) = requested.get(&row.contract) {
+                                        if row.available
+                                            || row.provider.is_some()
+                                            || row.major != *major
+                                        {
+                                            return Err(error("catalog_changed"));
+                                        }
+                                        requested.remove(&row.contract);
+                                    }
+                                }
+                                if requested.is_empty() {
+                                    return Ok(());
+                                }
+                                cursor = page.next_cursor;
+                                if cursor.is_none() {
+                                    return Err(error("not_found"));
+                                }
+                            }
+                        },
+                    )
+                    .await
+                    .map_err(|_| error("timeout"))??;
+                    for choice in &change.contracts {
+                        next.contracts.remove(&choice.contract);
+                        cleanup.push(choice.contract.clone());
+                    }
+                } else if !change.enabled {
+                    let provider = change.provider.as_deref().expect("present Provider");
                     cleanup.extend(
                         next.contracts
                             .iter()
-                            .filter(|(_, c)| c.provider == change.provider)
+                            .filter(|(_, c)| c.provider == provider)
                             .map(|(id, _)| id.clone()),
                     );
-                    next.contracts.retain(|_, c| c.provider != change.provider);
+                    next.contracts.retain(|_, c| c.provider != provider);
                 } else {
+                    let provider = change.provider.as_deref().expect("present Provider");
                     if change.contracts.is_empty() || change.contracts.len() > 256 {
                         return Err(error("bad_request"));
                     }
@@ -349,16 +399,16 @@ impl Policy {
                         next.contracts
                             .entry(c.contract.clone())
                             .and_modify(|stored| {
-                                if stored.provider != change.provider || stored.major != c.major {
+                                if stored.provider != provider || stored.major != c.major {
                                     stored.tools.clear();
                                 }
-                                stored.provider = change.provider.clone();
+                                stored.provider = provider.to_owned();
                                 stored.major = c.major;
                                 stored.enabled = true;
                             })
                             .or_insert(ContractSelection {
                                 major: c.major,
-                                provider: change.provider.clone(),
+                                provider: provider.to_owned(),
                                 enabled: true,
                                 tools: BTreeMap::new(),
                             });
@@ -369,7 +419,7 @@ impl Policy {
                         async {
                             for choice in &change.contracts {
                                 let observed = self.catalog.observe(&choice.contract).await?;
-                                exact(&observed, choice.major, &change.provider)?;
+                                exact(&observed, choice.major, provider)?;
                                 self.catalog.enable(&observed).await?;
                             }
                             Ok::<(), BackendError>(())
@@ -595,7 +645,7 @@ impl Policy {
         )
         .await
         .map_err(|_| error("timeout"))??;
-        let rows:Vec<Value>=page.contracts.iter().map(|r|json!({"contract":r.contract,"major":r.major,"provider":r.provider.as_ref().map(|p|&p.identity),"displayName":r.provider.as_ref().map(|p|&p.display_name),"available":r.available,"hostEnabled":r.enabled,"selected":owner.config.contracts.get(&r.contract).is_some_and(|c|c.enabled),"guideEligibility":r.guide_eligibility,"excluded":excluded(r)})).collect();
+        let rows:Vec<Value>=page.contracts.iter().map(|r|json!({"contract":r.contract,"major":r.major,"provider":r.provider.as_ref().map(|p|&p.identity).or_else(||owner.config.contracts.get(&r.contract).map(|c|&c.provider)),"displayName":r.provider.as_ref().map(|p|&p.display_name),"available":r.available,"hostEnabled":r.enabled,"selected":owner.config.contracts.get(&r.contract).is_some_and(|c|c.enabled),"guideEligibility":r.guide_eligibility,"excluded":excluded(r)})).collect();
         Ok(json!({"contracts":rows,"nextCursor":page.next_cursor,"tools":[],"nextOffset":null}))
     }
 }

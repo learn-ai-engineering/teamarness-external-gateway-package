@@ -67,7 +67,7 @@ export type PackageContract = {
     readonly "external-gateway.package.set": { readonly request: {
         readonly "contracts": readonly ObservedContract[];
         readonly "enabled": boolean;
-        readonly "provider": string;
+        readonly "provider": string | null;
       }; readonly response: {
         readonly "ok": boolean;
         readonly "warning": string | null;
