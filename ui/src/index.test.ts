@@ -19,13 +19,13 @@ function fake(requests = {}) {
   return createFakePackageClient({ requests: { "external-gateway.status.get": () => status, "external-gateway.catalog.page": () => emptyPage, ...requests }, subscriptions: { "external-gateway.status.watch": () => undefined } });
 }
 describe("External Gateway main/settings mount", () => {
-  it("shows Workspace, read-only status and secret-free onboarding; navigates settings without Shell controls", async () => {
+  it("shows Workspace, selected-access status and secret-free onboarding; navigates settings without Shell controls", async () => {
     const client = fake(); const root = setup(client);
     expect(root.textContent).toContain("Loading");
     await flush();
     expect(root.textContent).toContain("Test Workspace");
     expect(root.textContent).toContain("workspace1");
-    expect(root.textContent).toContain("Read-only");
+    expect(root.textContent).toContain("Person-selected");
     expect(root.textContent).toContain("Listener stopped");
     expect(root.textContent).toContain("<BEARER>");
     expect(client.calls.filter(c => c.operation === "external-gateway.catalog.page")).toHaveLength(0);
@@ -123,26 +123,33 @@ describe("Shared settings and one-time tokens", () => {
   });
 });
 
-const contract: Contract = { contract: "dev.example.alpha", major: 1, provider: "dev.example.multi", displayName: "Multi", available: true, hostEnabled: false, selected: false, guideEligibility: "eligible", excluded: false };
-const tool: Tool = { port: "read.one", fingerprint: "a".repeat(64), eligible: true, selected: false, reviewRequired: false };
+const contract: Contract = { contract: "dev.example.alpha", major: 1, provider: "dev.example.multi", displayName: "Multi", available: true, hostEnabled: false, selected: false, guideEligibility: "eligible" };
+const tool: Tool = { port: "read.one", fingerprint: "a".repeat(64), eligible: true, selected: false, reviewRequired: false, kind: "query", delivery: "response" };
 describe("Bounded catalog settings", () => {
-  it("groups contracts, selects exact tools, keeps new tools off and explains excluded/missing/unavailable choices", async () => {
-    const rows = [contract, { ...contract, contract: "dev.example.beta" }, { ...contract, contract: "dev.example.missing", provider: "dev.example.guide-less", guideEligibility: "missing" }, { ...contract, contract: "dev.teamarness.conversations", provider: "dev.teamarness.conversations", excluded: true }, { ...contract, contract: "dev.example.gone", provider: null, displayName: null, available: false, hostEnabled: true, guideEligibility: "unavailable" }];
+  it("groups contracts, selects exact tools, keeps new tools off and explains missing/unavailable choices", async () => {
+    const rows = [contract, { ...contract, contract: "dev.example.beta" }, { ...contract, contract: "dev.example.missing", provider: "dev.example.guide-less", guideEligibility: "missing" }, { ...contract, contract: "dev.teamarness.conversations", provider: "dev.teamarness.conversations" }, { ...contract, contract: "dev.example.gone", provider: null, displayName: null, available: false, hostEnabled: true, guideEligibility: "unavailable" }];
     const client = fake({
-      "external-gateway.catalog.page": (p: { contract?: string }) => p.contract ? { ...emptyPage, tools: [tool, { ...tool, port: "read.new" }, { ...tool, port: "read.changed", selected: true, reviewRequired: true }, { ...tool, port: "runtime.guide", eligible: false }, { ...tool, port: "write.one", eligible: false }] } : { ...emptyPage, contracts: rows },
+      "external-gateway.catalog.page": (p: { contract?: string }) => p.contract ? { ...emptyPage, tools: [tool, { ...tool, port: "read.new" }, { ...tool, port: "read.changed", selected: true, reviewRequired: true }, { ...tool, port: "runtime.guide", eligible: false }, { ...tool, port: "write.one", kind: "command" }, { ...tool, port: "watch.one", delivery: "stream" }, { ...tool, port: "events.one", kind: "event", delivery: "stream" }] } : { ...emptyPage, contracts: rows },
       "external-gateway.package.set": () => ({ ok: true, warning: null }),
       "external-gateway.tool.set": () => ({ ok: true, warning: null }),
     });
     const root = setup(client, "settings"); await flush();
-    expect(root.textContent).toContain("Missing runtime guide"); expect(root.textContent).toContain("Conversations is excluded");
+    expect(root.textContent).toContain("Missing runtime guide"); expect(button(root, "Tools · dev.teamarness.conversations").disabled).toBe(false);
     button(root, "Enable displayed contracts · Multi").click(); await flush();
     expect(client.calls).toContainEqual({ operation: "external-gateway.package.set", payload: { provider: "dev.example.multi", enabled: true, contracts: [{ contract: "dev.example.alpha", major: 1 }, { contract: "dev.example.beta", major: 1 }] } });
     button(root, "Tools · dev.example.alpha").click(); await flush();
-    expect(button(root, "Enable read.new").disabled).toBe(false);
+    expect(button(root, "Enable read read.new").disabled).toBe(false);
     expect(root.textContent).toContain("Review required"); expect(root.textContent).toContain("Guide included automatically");
-    expect(root.all().some(e => e.tagName === "button" && e.textContent === "Enable write.one")).toBe(false);
-    button(root, "Enable read.one").click(); await flush();
+    expect(button(root, "Enable write write.one").disabled).toBe(false);
+    expect(button(root, "Enable streaming query watch.one").disabled).toBe(false);
+    expect(button(root, "Enable event events.one").disabled).toBe(false);
+    expect(root.textContent).toContain("Write"); expect(root.textContent).toContain("Streaming query"); expect(root.textContent).toContain("Event");
+    expect(root.textContent).toContain("writes act as the local Workspace Person");
+    expect(client.calls.filter(c => c.operation === "external-gateway.tool.set")).toHaveLength(0);
+    button(root, "Enable read read.one").click(); await flush();
     expect(client.calls).toContainEqual({ operation: "external-gateway.tool.set", payload: { contract: "dev.example.alpha", major: 1, provider: "dev.example.multi", port: "read.one", fingerprint: "a".repeat(64), enabled: true } });
+    button(root, "Enable write write.one").click(); await flush();
+    expect(client.calls).toContainEqual({ operation: "external-gateway.tool.set", payload: { contract: "dev.example.alpha", major: 1, provider: "dev.example.multi", port: "write.one", fingerprint: "a".repeat(64), enabled: true } });
     button(root, "Remove unavailable · dev.example.gone").click(); await flush();
     expect(client.calls).toContainEqual({ operation: "external-gateway.package.set", payload: { provider: null, enabled: false, contracts: [{ contract: "dev.example.gone", major: 1 }] } });
   });

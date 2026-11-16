@@ -1,4 +1,4 @@
-//! Bounded Person metadata and ordinary queries. No known-Provider allowlist or all-schema cache.
+//! Bounded Person metadata and metadata-derived Port dispatch. No known-Provider allowlist or all-schema cache.
 use crate::error;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -12,7 +12,37 @@ use teamarness_package_sdk::{
     },
 };
 
-pub const CONVERSATIONS: &str = "dev.teamarness.conversations";
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shape {
+    Read,
+    Write,
+    StreamingQuery,
+    Event,
+}
+impl Shape {
+    pub fn kind(self) -> &'static str {
+        match self {
+            Self::Read | Self::StreamingQuery => "query",
+            Self::Write => "command",
+            Self::Event => "event",
+        }
+    }
+    pub fn delivery(self) -> &'static str {
+        if matches!(self, Self::Read | Self::Write) {
+            "response"
+        } else {
+            "stream"
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Read => "Read",
+            Self::Write => "Write",
+            Self::StreamingQuery => "Streaming query",
+            Self::Event => "Event",
+        }
+    }
+}
 pub struct Catalog {
     client: PortClientV3,
     cache: std::sync::Mutex<MetadataCache>,
@@ -26,10 +56,23 @@ impl Observed {
     pub fn route(&self) -> PortContractRef<'_> {
         route(&self.summary)
     }
-    pub fn ordinary(&self, port: &str) -> bool {
-        self.document.contracts[0].ports.iter().any(|p| {
-            p.name == port && p.kind == PortKind::Query && p.response.is_some() && p.event.is_none()
-        })
+    pub fn shape(&self, port: &str) -> Option<Shape> {
+        let p = self.document.contracts[0]
+            .ports
+            .iter()
+            .find(|p| p.name == port)?;
+        match (
+            p.kind,
+            p.request.is_some(),
+            p.response.is_some(),
+            p.event.is_some(),
+        ) {
+            (PortKind::Query, true, true, false) => Some(Shape::Read),
+            (PortKind::Command, true, true, false) => Some(Shape::Write),
+            (PortKind::Query, true, false, true) => Some(Shape::StreamingQuery),
+            (PortKind::Event, false, false, true) => Some(Shape::Event),
+            _ => None,
+        }
     }
     pub fn fingerprint(&self, port: &str) -> Result<String, BackendError> {
         let projection = self
@@ -94,13 +137,6 @@ fn strip_descriptions(value: &mut Value) {
         }
     }
 }
-pub fn excluded(row: &ContractSummaryV3) -> bool {
-    row.contract == CONVERSATIONS
-        || row
-            .provider
-            .as_ref()
-            .is_some_and(|p| p.identity == CONVERSATIONS)
-}
 fn route(row: &ContractSummaryV3) -> PortContractRef<'_> {
     PortContractRef {
         access: PortAccessV3::Person,
@@ -144,8 +180,7 @@ impl Catalog {
                 other => other?,
             };
             if let Some(summary) = page.contracts.into_iter().find(|r| r.contract == contract) {
-                if excluded(&summary)
-                    || summary.guide_eligibility != GuideEligibility::Eligible
+                if summary.guide_eligibility != GuideEligibility::Eligible
                     || summary.route_revision.is_none()
                     || summary.provider.is_none()
                 {
@@ -199,16 +234,37 @@ impl Catalog {
     pub async fn disable(&self, contract: &str) -> Result<(), BackendError> {
         self.client.disable(PortAccessV3::Person, contract).await
     }
-    pub async fn query(
+    pub async fn call(
         &self,
         observed: &Observed,
         port: &str,
         request: Value,
     ) -> Result<Value, BackendError> {
-        if !observed.ordinary(port) || excluded(&observed.summary) {
-            return Err(error("forbidden"));
+        match observed.shape(port) {
+            Some(Shape::Read) => self.client.query(observed.route(), port, request).await,
+            Some(Shape::Write) => self.client.command(observed.route(), port, request).await,
+            _ => Err(error("bad_request")),
         }
-        self.client.query(observed.route(), port, request).await
+    }
+    pub async fn subscribe(
+        &self,
+        observed: &Observed,
+        port: &str,
+        request: Value,
+    ) -> Result<teamarness_package_sdk::CapabilitySubscription, BackendError> {
+        match observed.shape(port) {
+            Some(Shape::StreamingQuery) => {
+                self.client
+                    .live_query_confirmed(observed.route(), port, request)
+                    .await
+            }
+            Some(Shape::Event) if request.is_null() => {
+                self.client
+                    .subscribe_event_confirmed(observed.route(), port)
+                    .await
+            }
+            _ => Err(error("bad_request")),
+        }
     }
 }
 

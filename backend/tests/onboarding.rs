@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 async fn generic_read(port: u16, bearer: &str) -> Value {
     let (status, manifest) = get(port, bearer, "/v1").await;
     assert_eq!(status, 200);
-    assert_eq!(manifest["readOnly"], true);
+    assert_eq!(manifest["readOnly"], false);
     let (status, onboarding) = get(
         port,
         bearer,

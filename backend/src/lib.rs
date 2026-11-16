@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-//! Standalone Person-authorized read policy and bounded loopback HTTP.
+//! Standalone Person-authorized exact-tool policy and bounded loopback HTTP.
 pub mod catalog;
 pub mod config;
 pub mod http;
@@ -7,6 +7,7 @@ pub mod limits;
 pub mod listener;
 mod membership;
 pub mod policy;
+mod streams;
 pub mod tokens;
 use policy::{Change, Policy};
 use serde::Deserialize;

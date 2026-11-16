@@ -87,14 +87,15 @@
         "readOnly",
         "workspace",
         "routes",
-        "limits"
+        "limits",
+        "supportedShapes"
       ],
       "properties": {
         "version": {
           "const": 1
         },
         "readOnly": {
-          "const": true
+          "const": false
         },
         "workspace": {
           "type": "object",
@@ -117,7 +118,8 @@
           "required": [
             "contracts",
             "onboarding",
-            "call"
+            "call",
+            "subscribe"
           ],
           "properties": {
             "contracts": {
@@ -128,6 +130,9 @@
             },
             "call": {
               "const": "/v1/call"
+            },
+            "subscribe": {
+              "const": "/v1/subscribe"
             }
           },
           "additionalProperties": false
@@ -138,7 +143,11 @@
             "outstandingSdkInvocations",
             "portValueBytes",
             "metadataBytes",
-            "toolWaitSeconds"
+            "toolWaitSeconds",
+            "streams",
+            "streamHeartbeatSeconds",
+            "streamWriteSeconds",
+            "streamFrameAllowanceBytes"
           ],
           "properties": {
             "outstandingSdkInvocations": {
@@ -152,9 +161,41 @@
             },
             "toolWaitSeconds": {
               "const": 25
+            },
+            "streams": {
+              "const": 8
+            },
+            "streamHeartbeatSeconds": {
+              "const": 15
+            },
+            "streamWriteSeconds": {
+              "const": 5
+            },
+            "streamFrameAllowanceBytes": {
+              "const": 4096
             }
           },
           "additionalProperties": false
+        },
+        "supportedShapes": {
+          "const": [
+            {
+              "kind": "query",
+              "delivery": "response"
+            },
+            {
+              "kind": "command",
+              "delivery": "response"
+            },
+            {
+              "kind": "query",
+              "delivery": "stream"
+            },
+            {
+              "kind": "event",
+              "delivery": "stream"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -300,6 +341,184 @@
         }
       },
       "additionalProperties": false
+    },
+    "subscribe": {
+      "type": "object",
+      "required": [
+        "contract",
+        "major",
+        "port",
+        "request"
+      ],
+      "properties": {
+        "contract": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "major": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "port": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "request": {}
+      },
+      "additionalProperties": false
+    },
+    "ready": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "ready"
+        },
+        "contract": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "major": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "port": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "kind": {
+          "enum": [
+            "query",
+            "event"
+          ]
+        },
+        "delivery": {
+          "const": "stream"
+        }
+      },
+      "required": [
+        "type",
+        "contract",
+        "major",
+        "port",
+        "kind",
+        "delivery"
+      ],
+      "additionalProperties": false
+    },
+    "value": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "value"
+        },
+        "value": {}
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "heartbeat": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "heartbeat"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "endCompleted": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "end"
+        },
+        "reason": {
+          "const": "completed"
+        }
+      },
+      "required": [
+        "type",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "endError": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "end"
+        },
+        "reason": {
+          "const": "error"
+        },
+        "error": {
+          "type": "object",
+          "required": [
+            "source",
+            "code",
+            "retryable",
+            "outcomeUncertain",
+            "details"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "enum": [
+                "gateway",
+                "host",
+                "provider"
+              ]
+            },
+            "code": {
+              "type": "string",
+              "pattern": "^[a-z0-9_.-]{1,128}$"
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "outcomeUncertain": {
+              "type": "boolean"
+            },
+            "details": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "required": [
+        "type",
+        "reason",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "streamFrame": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ready"
+        },
+        {
+          "$ref": "#/$defs/value"
+        },
+        {
+          "$ref": "#/$defs/heartbeat"
+        },
+        {
+          "$ref": "#/$defs/endCompleted"
+        },
+        {
+          "$ref": "#/$defs/endError"
+        }
+      ]
     }
   },
   "x-limits": {
@@ -325,7 +544,11 @@
     "CATALOG_READ_TIMEOUT": 5,
     "LISTENER_DRAIN_TIMEOUT": 5,
     "MAX_HOST_CURSOR_BYTES": 2048,
-    "MAX_HTTP_CURSOR_CHARS": 2731
+    "MAX_HTTP_CURSOR_CHARS": 2731,
+    "MAX_STREAMS": 8,
+    "STREAM_HEARTBEAT_SECONDS": 15,
+    "STREAM_WRITE_SECONDS": 5,
+    "STREAM_FRAME_ALLOWANCE_BYTES": 4096
   },
   "x-gateway-status": {
     "unauthorized": 401,

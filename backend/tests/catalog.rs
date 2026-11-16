@@ -1,5 +1,5 @@
 //! Verifies: TEAM.SYS.PKG-R03, R13, R19. Bounded discovery through typed UI and SDK v3.
-mod membership_support;
+use http_support::membership_support;
 use serde_json::{Value, json};
 use teamarness_generated_package_backend::router;
 use teamarness_package_sdk::{
@@ -79,38 +79,49 @@ async fn catalog_churn_restarts_once_then_refuses_without_dispatch() {
     assert_eq!(script.recorded_calls().len(), 2);
     h.shutdown().await.unwrap();
 }
+mod http_support;
 #[tokio::test]
-async fn conversations_contract_or_provider_is_visible_as_excluded_and_refused_directly() {
-    for provider_exclusion in [false, true] {
-        let mut offered = row(0);
-        offered["guideEligibility"] = "eligible".into();
-        let contract = if provider_exclusion {
-            offered["provider"]["identity"] = "dev.teamarness.conversations".into();
-            "dev.test.contract000"
-        } else {
-            offered["contract"] = "dev.teamarness.conversations".into();
-            "dev.teamarness.conversations"
-        };
-        let script = ScriptedCapability::new().calls(move |method, _| {
-            assert_eq!(method, "available");
-            Ok(json!({"contracts":[offered]}))
-        });
+async fn conversations_contract_and_provider_identities_support_exact_explicit_selection() {
+    for contract_identity in [false, true] {
         let dir = tempfile::tempdir().unwrap();
-        let mut h = HarnessBuilder::new(router().into_backend())
-            .data_directory(dir.path().canonicalize().unwrap())
-            .installation(&"b".repeat(64), "Local")
-            .capability("teamarness.membership", membership_support::present())
-            .capability_version("teamarness.package-ports", script, 3, 0)
-            .start()
-            .await;
-        h.activate().await.unwrap();
-        assert_eq!(
-            h.request("external-gateway.catalog.page", json!({}))
-                .await
-                .unwrap()["contracts"][0]["excluded"],
-            true
-        );
-        assert_eq!(h.request("external-gateway.tool.set",json!({"contract":contract,"major":1,"provider":"dev.test.provider","port":"read.item","fingerprint":"c".repeat(64),"enabled":true})).await.unwrap_err().code(),"external_gateway.forbidden");
+        let mut provider = http_support::Provider::new();
+        let contract = if contract_identity {
+            "dev.teamarness.conversations"
+        } else {
+            "dev.test.reads"
+        };
+        provider.document["contracts"][0]["identity"] = contract.into();
+        if !contract_identity {
+            provider.provider = "dev.teamarness.conversations".into();
+        }
+        let identity = provider.provider.clone();
+        let p = std::sync::Arc::new(std::sync::Mutex::new(provider));
+        let mut h = http_support::start(p.clone(), dir.path()).await;
+        let (port, bearer) = http_support::enable(&mut h).await;
+        let body = json!({"contract":contract,"major":1,"port":"read.item","request":{}});
+        assert_eq!(http_support::post(port, &bearer, body.clone()).await.0, 403);
+        let page = h
+            .request("external-gateway.catalog.page", json!({}))
+            .await
+            .unwrap();
+        assert!(page["contracts"][0].get("excluded").is_none());
+        let tools = h
+            .request(
+                "external-gateway.catalog.page",
+                json!({"contract":contract}),
+            )
+            .await
+            .unwrap();
+        for tool in tools["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|t| t["port"] != "runtime.guide")
+        {
+            assert_eq!(tool["eligible"], true);
+            h.request("external-gateway.tool.set",json!({"contract":contract,"major":1,"provider":identity,"port":tool["port"],"fingerprint":tool["fingerprint"],"enabled":true})).await.unwrap();
+        }
+        assert_eq!(http_support::post(port, &bearer, body).await.0, 200);
         h.shutdown().await.unwrap();
     }
 }

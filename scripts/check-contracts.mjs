@@ -7,6 +7,10 @@ assert.deepEqual(Object.keys(ui.requests).sort(),["status.get","catalog.page","l
 assert.deepEqual(Object.keys(ui.subscriptions),["external-gateway.status.watch"]);
 for(const request of [...Object.values(ui.requests),...Object.values(ui.subscriptions)])assert.equal(request.request.additionalProperties,false);
 const manifest=JSON.parse(read("../teamarness.package.json"));
+assert.deepEqual(manifest.protocol,{major:1,minMinor:1,maxMinor:1});
+assert.equal(ui.$defs.Contract.properties.excluded,undefined);
+assert.deepEqual(ui.$defs.Tool.properties.kind.enum,["query","command","event"]);
+assert.deepEqual(ui.$defs.Tool.properties.delivery.enum,["response","stream"]);
 assert.deepEqual(manifest.capabilities,[{identity:"teamarness.workspace-context",major:1,minMinor:0,maxMinor:0},{identity:"teamarness.package-ports",major:3,minMinor:0,maxMinor:0},{identity:"teamarness.membership",major:1,minMinor:0,maxMinor:0}]);
 assert.deepEqual(manifest.ui.views,["settings"]);
 assert.equal(manifest.consumedPorts,undefined);assert.equal(manifest.providedPorts,undefined);assert.equal(manifest.activation,undefined);
@@ -21,7 +25,7 @@ console.log("Closed UI contract, generated types, declared capabilities and plan
 const http=JSON.parse(read("../contracts/http-v1.schema.json"));
 assert.equal(http["x-limits"].MAX_HOST_CALLS,12);
 assert.equal(http.$defs.manifest.properties.limits.properties.outstandingSdkInvocations.const,12);
-for(const name of ["call","result","error","manifest","contracts","schema","guide","onboarding"]){
+for(const name of ["call","result","error","manifest","contracts","schema","guide","onboarding","subscribe","ready","value","heartbeat","endCompleted","endError"]){
  assert.equal(http.$defs[name].additionalProperties,false);
  assert.deepEqual([...http.$defs[name].required].sort(),Object.keys(http.$defs[name].properties).sort());
 }
@@ -50,3 +54,9 @@ assert.equal(limits.MAX_HTTP_CURSOR_CHARS,Math.ceil(limits.MAX_HOST_CURSOR_BYTES
 assert.equal(ui.requests["external-gateway.catalog.page"].request.properties.cursor.maxLength,limits.MAX_HOST_CURSOR_BYTES);
 assert.equal(limits.MAX_TARGET_BYTES,4096);
 console.log("HTTP cursor envelope bounds agree; Host/UI cursor and request-target budgets remain unchanged.");
+
+assert.equal(http.$defs.manifest.properties.readOnly.const,false);
+assert.deepEqual(http.$defs.manifest.properties.supportedShapes.const,[{kind:"query",delivery:"response"},{kind:"command",delivery:"response"},{kind:"query",delivery:"stream"},{kind:"event",delivery:"stream"}]);
+assert.equal(http.$defs.manifest.properties.routes.properties.subscribe.const,"/v1/subscribe");
+assert.equal(http.$defs.manifest.properties.limits.properties.streams.const,8);
+console.log("Process 1.1, four shapes and closed subscription/frame contracts match.");

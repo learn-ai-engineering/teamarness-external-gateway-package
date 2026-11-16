@@ -1,15 +1,15 @@
 {
   "templateVersion": 2,
-  "packageProcessProtocol": "1.0",
+  "packageProcessProtocol": "1.1",
   "uiHostVersion": 2,
   "sdkSource": "vendored-from-teamarness-checkout",
   "sdkUpgrade": "unsupported-in-place",
-  "sdkRevision": "2ad3badb3e99845a23c699d18c656af9f14568a0",
+  "sdkRevision": "8f3a64367988c8860527ce3fbcc9a676d2646c1d",
   "sdkRevisionDirty": false,
   "vendorDigests": {
-    "package-contract": "sha256:cfa255fb97299b3183dd90beabb952d729fcf56dc530df8832dad40007345bd7",
-    "package-protocol": "sha256:7efa14b378b1297a4bdb5820a44b4697e9baf5c9124a37beb59ef352a92ec9b5",
-    "package-sdk": "sha256:1514276bd2b31692d443887067306eb0e6672de71db063060754f0c4a87a6aa6",
+    "package-contract": "sha256:cb616dfc36d5935b4c21dee498e34218b44b73b44be9c7c47ae62d497599d40d",
+    "package-protocol": "sha256:25a8489a546c50f5ed583948d93199a173bae053ddaf17ea8976e85bfdd601c5",
+    "package-sdk": "sha256:2c26f75486a5048551f33e1568cad7e74514056addbe4b090c8ad6cc1dfa844b",
     "package-ui-sdk": "sha256:ade3f0037675dc03c5a948a74b7d21ab5fc1e5e760fe9024a523469d0fd032cc"
   },
   "requestNamespace": "external-gateway"

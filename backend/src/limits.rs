@@ -11,6 +11,10 @@ pub const REQUESTS_PER_SECOND: usize = 8;
 pub const REQUEST_BURST: usize = 16;
 /// Outstanding gateway SDK invocations, not a global Host execution limit.
 pub const MAX_HOST_CALLS: usize = 12;
+pub const MAX_STREAMS: usize = 8;
+pub const STREAM_HEARTBEAT_SECONDS: usize = 15;
+pub const STREAM_WRITE_SECONDS: usize = 5;
+pub const STREAM_FRAME_ALLOWANCE_BYTES: usize = 4096;
 pub const TOOL_WAIT_TIMEOUT: usize = 25;
 pub const PORT_VALUE_BYTES: usize = 262144;
 pub const ENVELOPE_ALLOWANCE_BYTES: usize = 4096;
@@ -35,6 +39,30 @@ use tokio::{
     task::JoinSet,
     time::Instant,
 };
+
+/// Invocation-local command context, not an enqueue receipt or durable ledger.
+#[derive(Clone, Default)]
+pub struct Invocation(Arc<std::sync::atomic::AtomicBool>);
+impl Invocation {
+    pub(crate) fn mark_command(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    pub(crate) fn failure(&self, e: BackendError) -> BackendError {
+        if e.code().starts_with("external_gateway.")
+            && self.0.load(std::sync::atomic::Ordering::SeqCst)
+        {
+            BackendError::new(e.code(), false, e.details().clone()).with_outcome_uncertain(true)
+        } else {
+            e
+        }
+    }
+    pub async fn observe<T>(
+        &self,
+        work: impl Future<Output = Result<T, BackendError>>,
+    ) -> Result<T, BackendError> {
+        observe(work).await.map_err(|e| self.failure(e))
+    }
+}
 
 /// Owns bounded local futures independently of their HTTP observers. Every SDK terminal releases.
 pub struct Calls {
@@ -214,5 +242,44 @@ mod tests {
         assert_eq!(calls.slots.available_permits(), 12);
         assert!(calls.run(async { Ok(()) }).await.is_ok());
         calls.dispose().await;
+    }
+}
+
+#[cfg(test)]
+mod invocation_tests {
+    use super::*;
+    #[tokio::test(start_paused = true)]
+    async fn possible_command_dispatch_makes_gateway_observer_loss_uncertain_but_not_explicit_refusal()
+     {
+        let calls = Arc::new(Calls::default());
+        let invocation = Invocation::default();
+        let context = invocation.clone();
+        let owner = calls.clone();
+        let (entered, ready) = oneshot::channel();
+        let (release, released) = oneshot::channel();
+        let observation = tokio::spawn(async move {
+            invocation
+                .observe(owner.run(async move {
+                    context.mark_command();
+                    let _ = entered.send(());
+                    released.await.map_err(|_| crate::error("unavailable"))
+                }))
+                .await
+        });
+        ready.await.unwrap();
+        tokio::time::advance(Duration::from_secs(25)).await;
+        let error = observation.await.unwrap().unwrap_err();
+        assert_eq!(error.code(), "external_gateway.timeout");
+        assert!(error.outcome_uncertain());
+        assert!(!error.retryable());
+        assert_eq!(calls.slots.available_permits(), 11);
+        release.send(()).unwrap();
+        tokio::task::yield_now().await;
+        assert_eq!(calls.slots.available_permits(), 12);
+        calls.dispose().await;
+        let invocation = Invocation::default();
+        invocation.mark_command();
+        let refusal = BackendError::new("port_request_invalid", false, serde_json::json!({}));
+        assert!(!invocation.failure(refusal).outcome_uncertain());
     }
 }

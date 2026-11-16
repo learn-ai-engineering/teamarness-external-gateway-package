@@ -244,7 +244,7 @@ async fn tool_or_master_disable_before_final_local_admission_prevents_dispatch()
     }
 }
 #[tokio::test]
-async fn conversations_and_changed_route_are_refused_without_automatic_call_retry() {
+async fn changed_provider_and_route_are_refused_without_automatic_call_retry() {
     use teamarness_package_sdk::BackendError;
     let d = tempfile::tempdir().unwrap();
     let p = Arc::new(Mutex::new(Provider::new()));
@@ -252,7 +252,8 @@ async fn conversations_and_changed_route_are_refused_without_automatic_call_retr
     select(&mut h).await;
     let (port, bearer) = enable(&mut h).await;
     p.lock().unwrap().provider = "dev.teamarness.conversations".into();
-    assert_eq!(post(port, &bearer, call(json!({}))).await.0, 403);
+    // Identity is selectable, but replacing the saved exact Provider requires review.
+    assert_eq!(post(port, &bearer, call(json!({}))).await.0, 409);
     assert_eq!(
         get(port, &bearer, "/v1/contracts").await.1["contracts"],
         json!([])

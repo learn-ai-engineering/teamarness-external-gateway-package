@@ -4,7 +4,6 @@ export type Contract = {
   readonly "available": boolean;
   readonly "contract": string;
   readonly "displayName": string | null;
-  readonly "excluded": boolean;
   readonly "guideEligibility": "eligible" | "missing" | "unavailable";
   readonly "hostEnabled": boolean;
   readonly "major": number;
@@ -35,8 +34,10 @@ export type Token = {
 };
 
 export type Tool = {
+  readonly "delivery": "response" | "stream";
   readonly "eligible": boolean;
   readonly "fingerprint": string;
+  readonly "kind": "query" | "command" | "event";
   readonly "port": string;
   readonly "reviewRequired": boolean;
   readonly "selected": boolean;

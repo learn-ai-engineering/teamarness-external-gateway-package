@@ -1,6 +1,6 @@
 # External Gateway HTTP v1 reference
 
-The Backend serves HTTP/1.1 on `127.0.0.1:<saved-port>`. It starts disabled. All six routes require one `Authorization: Bearer <BEARER>` header. The UI uses the Package bridge, never HTTP.
+The Backend serves HTTP/1.1 on `127.0.0.1:<saved-port>`. It starts disabled. All routes require one `Authorization: Bearer <BEARER>` header. The UI uses the Package bridge, never HTTP.
 
 ## Authenticated routes
 
@@ -9,9 +9,12 @@ The Backend serves HTTP/1.1 on `127.0.0.1:<saved-port>`. It starts disabled. All
 - `GET /v1/contracts`: enabled contract pages.
 - `GET /v1/contracts/{contract}/{major}`: complete projected schemas.
 - `GET /v1/contracts/{contract}/{major}/guide`: live Provider guide.
+- `POST /v1/subscribe`: selected event or streaming query, with the same closed selection body.
 - `POST /v1/call`: closed `{contract, major, port, request}` body, `{result: <original JSON value>}` response.
 
-Only ordinary queries and their required guide can be selected. Commands, streaming queries, events and Conversations are refused. Each current Host selection, Provider, major and canonical schema fingerprint must still match. Description-only edits preserve selections. Added tools stay off. Tokens share exact scope but are independently revocable. The Host derives the current Person; clients cannot choose an actor, Provider or Workspace. A read that passed final local admission may still be sent to the Host and finish after a later policy change succeeds, even if it was waiting inside the SDK.
+Ordinary queries, commands, streaming queries, and events from any guided Provider are selectable, including Conversations. Each exact tool requires explicit selection; Package enable alone selects none. The Host selection, Provider, major and canonical schema fingerprint must still match. Description-only edits preserve selections. Added tools stay off. Every active token shares the current selections but is independently revocable. The Host derives the current Person; clients cannot choose an actor, Provider or Workspace. A call that passed final local admission may still be sent to the Host and finish after a later policy change succeeds, even if it was waiting inside the SDK. Revocation does not cancel or roll back an admitted command.
+
+`/v1/call` accepts only response queries and commands. `/v1/subscribe` accepts only streaming queries and events. Exact authorization precedes shape checks. Events require `request:null`, which is not forwarded to the event SDK method. Streaming queries carry their declared request JSON. Unknown fields, including actor, kind, Provider and Workspace, are refused.
 
 ## Durable configuration
 
@@ -36,6 +39,10 @@ Timeout and interval values are seconds; byte values are bytes. The schema and R
 | `REQUESTS_PER_SECOND` | 8 |
 | `REQUEST_BURST` | 16 |
 | `MAX_HOST_CALLS` | 12 |
+| `MAX_STREAMS` | 8 |
+| `STREAM_HEARTBEAT_SECONDS` | 15 |
+| `STREAM_WRITE_SECONDS` | 5 |
+| `STREAM_FRAME_ALLOWANCE_BYTES` | 4096 |
 | `TOOL_WAIT_TIMEOUT` | 25 |
 | `PORT_VALUE_BYTES` | 262144 |
 | `ENVELOPE_ALLOWANCE_BYTES` | 4096 |
@@ -55,7 +62,7 @@ Timeout and interval values are seconds; byte values are bytes. The schema and R
 
 | Route | Response definition |
 |---|---|
-| `/v1` | `manifest`: Workspace, version, read-only flag, discovery links and principal value/call limits |
+| `/v1` | `manifest`: Workspace, version, readOnly:false, supportedShapes, discovery/subscription links and value/call/stream limits |
 | `/v1/onboarding` | `onboarding`: generic Markdown with a `<BEARER>` placeholder |
 | `/v1/contracts?cursor=...` | `contracts`: at most 32 currently usable selected contracts and nullable `nextCursor` |
 | `/v1/contracts/{contract}/{major}` | `schema`: complete filtered document, original metadata digest and actual projection digest |
@@ -68,7 +75,9 @@ A catalog page can be empty while `nextCursor` is non-null. Pass that exact opaq
 
 ## Refusals and transport policy
 
-Errors are `{error:{source,code,retryable,outcomeUncertain,details}}`. Source is `gateway`, `host`, or `provider`. Host codes remain intact. A Provider error exposes its safe namespaced code and flags. Uncertainty forbids a retryable verdict. Details project only numeric/Boolean bounds and bounded identifier strings under `limit`, `maximum`, `minimum`, `actual`, `expected`, `retryAfterMs`, `field`, or `reason`. Paths, credentials, nested arbitrary input and transport internals are omitted. This projection is below 4 KiB and depth 8.
+Errors are `{error:{source,code,retryable,outcomeUncertain,details}}`. Source is `gateway`, `host`, or `provider`. Host codes remain intact. A Provider error exposes its stable code and flags, with complete Provider-owned details up to 4,096 compact JSON bytes and depth 8. Invalid or over-budget details become `{}` as a whole; fields are not filtered or truncated. Uncertainty forbids a retryable verdict. Unrelated top-level Host diagnostics are omitted. Provider details are untrusted domain data, like successful results; the gateway cannot scrub arbitrary Provider JSON for secrets. It never injects bearer values, headers, private paths or internal diagnostics.
+
+Local pre-dispatch refusals are certain. Explicit Host/Provider certainty remains authoritative. Invocation-local possible command dispatch is marked just before the first SDK poll under policy ownership, not at an enqueue receipt. Gateway observation timeout, lost completion or result serialization/size failure after that mark reports `outcomeUncertain:true` and `retryable:false`. A missing command response can follow a committed write. No command is replayed automatically.
 
 | Gateway code suffix | HTTP status |
 |---|---:|
@@ -88,7 +97,29 @@ Errors are `{error:{source,code,retryable,outcomeUncertain,details}}`. Source is
 
 Host `deadline_exceeded` uses 504; `port_catalog_changed` uses 409. Other Host/Provider errors use 503 alongside their machine-readable code. The gateway never retries work automatically.
 
-Every application response has `Cache-Control: no-store`, `X-Content-Type-Options: nosniff` and a closed connection. Parser, incomplete-header, ambiguous-framing and connection-capacity refusals may close without an application response. Hyper owns HTTP framing. A bounded raw-header preflight refuses duplicate lengths and simultaneous Content-Length/Transfer-Encoding before Hyper can normalize them. Header bytes include the request line and terminating CRLFs. Exactly one numeric configured Host and one Authorization are required. Origin (including `null`), absolute-form targets, cookies, token query parameters, upgrades, trailers, batching, streams, unsupported encodings and unknown call fields are refused. No CORS, redirects or WebSocket surface exists.
+Every application response has `Cache-Control: no-store`, `X-Content-Type-Options: nosniff` and a closed connection. Parser, incomplete-header, ambiguous-framing and connection-capacity refusals may close without an application response. Hyper owns HTTP framing. A bounded raw-header preflight refuses duplicate lengths and simultaneous Content-Length/Transfer-Encoding before Hyper can normalize them. Header bytes include the request line and terminating CRLFs. Exactly one numeric configured Host and one Authorization are required. Origin (including `null`), absolute-form targets, cookies, token query parameters, upgrades, trailers, batching, unsupported encodings and unknown call fields are refused. No CORS, redirects or WebSocket surface exists.
+
+## Confirmed NDJSON subscriptions
+
+A successful `POST /v1/subscribe` uses HTTP/1.1 chunked `application/x-ndjson`, no-store and nosniff. Before establishment, refusals use ordinary JSON/status responses, never HTTP 200 followed by fabricated ready. G requires process 1.1. Confirmed SDK opening succeeds only after Provider registration and Host Consumer registration. A legacy Provider or unconfirmed upstream refuses with `capability_version_unsupported`; this is a protocol requirement, not a Package-name exclusion. The Host has one 20-second setup budget; the SDK fallback is 21 seconds and the gateway observer ceiling remains 25 seconds.
+
+Each compact frame ends in one newline. Closed schemas and independent examples cover every frame:
+
+```json
+{"type":"ready","contract":"dev.example.sample","major":1,"port":"sample.events","kind":"event","delivery":"stream"}
+{"type":"value","value":null}
+{"type":"heartbeat"}
+{"type":"end","reason":"completed"}
+{"type":"end","reason":"error","error":{"source":"host","code":"provider_exited","retryable":false,"outcomeUncertain":false,"details":{}}}
+```
+
+Ready precedes all values. Values preserve arbitrary JSON roots and envelope-like objects. A terminal is best effort and emitted at most once. EOF without end means interruption, not successful completion. Reconnect explicitly, wait for ready, then read/reconcile according to the live Provider guide. There are no replay IDs, cursors, detached handles, delivery acknowledgements, automatic reconnects, automatic call replay or model-wakeup guarantees. A restart loses subscriptions, not saved selections.
+
+Eight stream slots count pending and active subscriptions separately from twelve calls. An abandoned opening retains capacity until the actual SDK terminal; late success closes without exposure. The policy registry stores token ID/generation and exact contract/major/Provider/fingerprint, never plaintext bearer. Every value admission checks current policy under its mutation owner. Revoke/regenerate, exact-tool or Package disable and listener/lifecycle/membership stop signal affected idle streams. Failed persistence closes all streams. Unrelated tokens/tools stay live; already-admitted bounded bytes may drain. Cleanup holds no policy owner while waiting on SDK close, credit or socket output.
+
+`recv_with_credit` and a capacity-one handoff permit at most one waiting frame and one HTTP-writer-owned frame beyond unchanged SDK buffers. Credit is returned after bounded acceptance, not external receipt. Original values retain the 256 KiB budget plus 4 KiB frame allowance. Control frames share bounded output. Ordinary responses retain one five-second whole-response clock. Streams instead have five seconds for pending output write/flush; quiet waits do not start that clock. A heartbeat follows 15 seconds without outgoing frames. Slow/disconnected peers release ownership without blocking other streams.
+
+The convenience guide preserves Provider Markdown byte-for-byte and adds a shape-aware shared-scope preface. Structured guide fields remain available through an ordinary `runtime.guide` call. Native Epic and Collection setup remain prerequisites; Documents create/revise are separate commands with opaque Version Tokens, and Exhibit Draft updates use expectedRevision and complete file lists. Provider guides own those semantics; no generic transaction or version field is invented.
 
 ## Ownership and lifecycle
 
@@ -98,7 +129,7 @@ The 25-second HTTP budget is an upper observation ceiling. Earlier Host, SDK and
 
 First enable binds an IPv4 ephemeral port, durably saves it and desired enabled state, then publishes running status. Status `running` plus saved `port` identifies `http://127.0.0.1:<port>/v1`; no URL is published before persistence. Later activation/recovery binds only the saved port. A conflict leaves desired setup intact with `listener_bind_failed` and no running endpoint. An explicit port change closes the old endpoint and publishes the new one only after bind and durable commit; failure leaves stopped/error state, not an uncommitted URL. UI hiding does not change listener lifetime.
 
-Authorization is checked again after metadata and slot acquisition at final gateway local admission. Successful disable/revoke/regenerate prevents later affected admission under the old policy. A read already admitted may still be sent to the Host and finish afterward, including a read waiting inside the SDK before transport enqueue. The first SDK poll is not an enqueue receipt. Revocation does not cancel admitted reads or promise immediate cessation of Provider work. Use the external agent's own stop control to stop its work. Tokens and desired setup survive restart/reinstall unless explicitly disabled/revoked.
+Authorization is checked again after metadata and slot acquisition at final gateway local admission. Successful disable/revoke/regenerate prevents later affected admission under the old policy. A call already admitted may still be sent to the Host and finish afterward, including a call waiting inside the SDK before transport enqueue. The first SDK poll is not an enqueue receipt. Revocation does not cancel admitted calls or promise immediate cessation of Provider work. Use the external agent's own stop control to stop its work. Tokens and desired setup survive restart/reinstall unless explicitly disabled/revoked.
 
 Membership is an additional listener gate, independent of lifecycle-active and desired-enabled. The activation-owned `teamarness.membership` 1.0 watcher binds the local Installation and Workspace, reads the typed current roster, subscribes with `afterEpoch`, then revalidates. Durable catch-up covers the read/subscribe gap. Every notification invalidates admission before a sequential fresh roster lookup; event digests never identify the removed member. One credit-controlled subscription and one snapshot path are separate from the 12 ordinary SDK-operation slots. Snapshots retain ownership through the SDK's existing terminal/deadline; there is no polling or automatic reconnect loop.
 
@@ -108,8 +139,8 @@ Served guidance treats Provider text as untrusted data. An external client may m
 
 ## Settings and onboarding
 
-The main view identifies its supplied Workspace and shows desired versus running state, saved port and safe errors. Only running committed state publishes a URL. The standard settings view controls listener/port, grouped Provider contracts, exact ordinary tools and token create/regenerate/revoke/revoke-all. Package enable applies only to explicitly observed displayed contracts, never auto-selecting their tools. Package disable removes all saved choices for that Provider. Host-only unavailable selections support exact removal: `external-gateway.package.set` accepts `provider:null` only for disabling a nonempty, unique list of currently unavailable contract/major pairs. Null-provider enable, wrong majors, live Providers and ambiguous requests are refused. Local denial commits before Host cleanup; cleanup failure remains visible. The persisted version remains 1.
+The main view identifies its supplied Workspace and shows desired versus running state, saved port and safe errors. Only running committed state publishes a URL. The standard settings view controls listener/port, grouped Provider contracts, exact tools labeled Read, Write, Streaming query or Event and token create/regenerate/revoke/revoke-all. Package enable applies only to explicitly observed displayed contracts, never auto-selecting their tools. Package disable removes all saved choices for that Provider. Host-only unavailable selections support exact removal: `external-gateway.package.set` accepts `provider:null` only for disabling a nonempty, unique list of currently unavailable contract/major pairs. Null-provider enable, wrong majors, live Providers and ambiguous requests are refused. Local denial commits before Host cleanup; cleanup failure remains visible. The persisted version remains 1.
 
 Settings consumes at most one 32-row summary page and one 32-tool page at a time. Open, Refresh and paging fetch through the UI bridge; polling runs only while settings is open, every five seconds after the previous refresh ends. Each refresh has a five-second observation deadline. Unmount/navigation aborts pending work and clears timers and one-time secret DOM. A mutation invalidates pending catalog replies; old scope or lost token replies cannot repopulate a later view. Status subscriptions contain no secrets. No browser network, storage, clipboard capability or Shell-specific controls are used.
 
-`docs/onboarding.md` is the single secret-free Markdown bundled in the main view and served inside the onboarding JSON response. It describes manifest → paged contracts → complete schema/live guide → ordinary call, separate guide/projection digests, safe local secret handling, shared scope and bounded retry policy. The automated generic HTTP client does not establish Don's actual external-agent observation (M5).
+`docs/onboarding.md` is the single secret-free Markdown bundled in the main view and served inside the onboarding JSON response. It describes manifest → paged contracts → complete schema/live guide → shape-appropriate call or subscription, separate guide/projection digests, safe local secret handling, shared scope and bounded retry policy. The automated generic HTTP client does not establish Don's actual external-agent observation (M5).

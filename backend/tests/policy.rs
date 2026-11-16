@@ -136,7 +136,7 @@ async fn token(h: &mut Harness, label: &str) -> Value {
         .unwrap()
 }
 #[tokio::test]
-async fn shared_scope_exact_reads_guide_and_regeneration_refuse_every_other_kind() {
+async fn shared_scope_exact_reads_guide_and_regeneration_refuse_unselected_operations() {
     let dir = tempfile::tempdir().unwrap();
     let p = Arc::new(Mutex::new(Provider::new()));
     let mut h = start(p.clone(), dir.path()).await;

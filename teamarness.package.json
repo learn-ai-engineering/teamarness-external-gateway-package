@@ -4,12 +4,12 @@
   "version": "1.0.0",
   "presentation": {
     "displayName": "External Gateway",
-    "description": "Person-authorized, explicitly selected read-only Workspace access for external clients."
+    "description": "Person-authorized, explicitly selected Workspace Ports for external clients."
   },
   "protocol": {
     "major": 1,
-    "minMinor": 0,
-    "maxMinor": 0
+    "minMinor": 1,
+    "maxMinor": 1
   },
   "backends": [
     {

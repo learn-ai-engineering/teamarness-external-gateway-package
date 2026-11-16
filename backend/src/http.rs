@@ -2,7 +2,7 @@
 use crate::{error, limits::*, policy::Policy};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use bytes::Bytes;
-use http_body_util::{BodyExt, Full};
+use http_body_util::{BodyExt, Full, combinators::UnsyncBoxBody};
 use hyper::{Request, Response, body::Incoming, server::conn::http1, service::service_fn};
 use hyper_util::rt::{TokioIo, TokioTimer};
 use serde::Deserialize;
@@ -11,7 +11,53 @@ use std::{convert::Infallible, sync::Arc, time::Duration};
 use teamarness_package_sdk::BackendError;
 use tokio::net::TcpStream;
 
-type Reply = Response<Full<Bytes>>;
+type Reply = Response<UnsyncBoxBody<Bytes, Infallible>>;
+enum Application {
+    Json(Value),
+    Stream(crate::streams::Output),
+}
+/// Let Hyper take another frame only after flushing the previous one. This
+/// keeps its internal buffering inside the one HTTP-writer-owned frame bound.
+#[derive(Default)]
+struct Progress {
+    streaming: std::sync::atomic::AtomicBool,
+    pending: std::sync::atomic::AtomicBool,
+    waiter: std::sync::Mutex<Option<std::task::Waker>>,
+}
+struct StreamBody {
+    output: crate::streams::Output,
+    progress: Arc<Progress>,
+}
+impl hyper::body::Body for StreamBody {
+    type Data = Bytes;
+    type Error = Infallible;
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<hyper::body::Frame<Bytes>, Infallible>>> {
+        let mut waiter = self.progress.waiter.lock().expect("stream writer");
+        if self
+            .progress
+            .pending
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            *waiter = Some(cx.waker().clone());
+            return std::task::Poll::Pending;
+        }
+        drop(waiter);
+        match self.output.receiver.poll_recv(cx) {
+            std::task::Poll::Ready(Some(bytes)) => {
+                self.progress
+                    .pending
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                std::task::Poll::Ready(Some(Ok(hyper::body::Frame::data(bytes))))
+            }
+            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
 pub async fn serve(socket: TcpStream, port: u16, policy: Arc<Policy>) {
     serve_application(socket, move |request, accepted| {
         handle(request, port, policy.clone(), accepted)
@@ -21,7 +67,7 @@ pub async fn serve(socket: TcpStream, port: u16, policy: Arc<Policy>) {
 async fn serve_application<F, Fut>(socket: TcpStream, handler: F)
 where
     F: Fn(Request<Incoming>, tokio::time::Instant) -> Fut,
-    Fut: std::future::Future<Output = Result<Value, BackendError>>,
+    Fut: std::future::Future<Output = Result<Application, BackendError>>,
 {
     let accepted = tokio::time::Instant::now();
     let Ok(Ok(socket)) = tokio::time::timeout_at(
@@ -32,11 +78,26 @@ where
     else {
         return;
     };
+    let progress = socket.progress.clone();
     let service = service_fn(move |request| {
+        let progress = progress.clone();
         let response = handler(request, accepted);
         async move {
             Ok::<_, Infallible>(match response.await {
-                Ok(v) => reply(200, v),
+                Ok(Application::Json(v)) => reply(200, v),
+                Ok(Application::Stream(output)) => {
+                    progress
+                        .streaming
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                    Response::builder()
+                        .status(200)
+                        .header("Content-Type", "application/x-ndjson")
+                        .header("Cache-Control", "no-store")
+                        .header("X-Content-Type-Options", "nosniff")
+                        .header("Connection", "close")
+                        .body(StreamBody { output, progress }.boxed_unsync())
+                        .expect("stream response")
+                }
                 Err(e) => failure(e),
             })
         }
@@ -63,7 +124,7 @@ async fn handle(
     port: u16,
     policy: Arc<Policy>,
     accepted: tokio::time::Instant,
-) -> Result<Value, BackendError> {
+) -> Result<Application, BackendError> {
     policy.charge()?;
     let headers = request.headers();
     if request.version() != http::Version::HTTP_11
@@ -115,7 +176,9 @@ async fn handle(
     }
     let path = request.uri().path().to_owned();
     let query = request.uri().query().map(str::to_owned);
-    if request.method() == http::Method::POST && path == "/v1/call" {
+    if request.method() == http::Method::POST
+        && matches!(path.as_str(), "/v1/call" | "/v1/subscribe")
+    {
         if query.is_some() {
             return Err(error("bad_request"));
         }
@@ -162,10 +225,24 @@ async fn handle(
         {
             return Err(error("bad_request"));
         }
-        let result =
-            observe(policy.query(bearer, call.contract, call.major, call.port, call.request))
-                .await?;
-        return Ok(json!({"result":result}));
+        if path == "/v1/subscribe" {
+            return policy
+                .subscribe(bearer, call.contract, call.major, call.port, call.request)
+                .await
+                .map(Application::Stream);
+        }
+        let invocation = Invocation::default();
+        let result = invocation
+            .observe(policy.call(
+                bearer,
+                call.contract,
+                call.major,
+                call.port,
+                call.request,
+                invocation.clone(),
+            ))
+            .await?;
+        return Ok(Application::Json(json!({"result":result})));
     }
     if request.method() != http::Method::GET {
         return Err(error("method_not_allowed"));
@@ -178,9 +255,9 @@ async fn handle(
     if query.is_some() && path != "/v1/contracts" {
         return Err(error("bad_request"));
     }
-    match path.as_str() {
+    let value = match path.as_str() {
         "/v1" => Ok(
-            json!({"version":1,"readOnly":true,"workspace":policy.workspace,"routes":{"contracts":"/v1/contracts","onboarding":"/v1/onboarding","call":"/v1/call"},"limits":{"outstandingSdkInvocations":MAX_HOST_CALLS,"portValueBytes":PORT_VALUE_BYTES,"metadataBytes":METADATA_BYTES,"toolWaitSeconds":TOOL_WAIT_TIMEOUT}}),
+            json!({"version":1,"readOnly":false,"workspace":policy.workspace,"routes":{"contracts":"/v1/contracts","onboarding":"/v1/onboarding","call":"/v1/call","subscribe":"/v1/subscribe"},"supportedShapes":[{"kind":"query","delivery":"response"},{"kind":"command","delivery":"response"},{"kind":"query","delivery":"stream"},{"kind":"event","delivery":"stream"}],"limits":{"outstandingSdkInvocations":MAX_HOST_CALLS,"portValueBytes":PORT_VALUE_BYTES,"metadataBytes":METADATA_BYTES,"toolWaitSeconds":TOOL_WAIT_TIMEOUT,"streams":MAX_STREAMS,"streamHeartbeatSeconds":STREAM_HEARTBEAT_SECONDS,"streamWriteSeconds":STREAM_WRITE_SECONDS,"streamFrameAllowanceBytes":STREAM_FRAME_ALLOWANCE_BYTES}}),
         ),
         "/v1/onboarding" => Ok(json!({"markdown":ONBOARDING})),
         "/v1/contracts" => {
@@ -243,7 +320,8 @@ async fn handle(
                 .map_err(|_| error("timeout"))?
             }
         }
-    }
+    }?;
+    Ok(Application::Json(value))
 }
 const ONBOARDING: &str = include_str!("../../docs/onboarding.md");
 fn reply(status: u16, value: Value) -> Reply {
@@ -253,12 +331,19 @@ fn reply(status: u16, value: Value) -> Reply {
         .header("Cache-Control", "no-store")
         .header("X-Content-Type-Options", "nosniff")
         .header("Connection", "close")
-        .body(Full::new(Bytes::from(
-            serde_json::to_vec(&value).expect("JSON value"),
-        )))
+        .body(
+            Full::new(Bytes::from(serde_json::to_vec(&value).expect("JSON value"))).boxed_unsync(),
+        )
         .expect("fixed response")
 }
+pub(crate) fn error_value(e: BackendError) -> Value {
+    project_error(e).1["error"].clone()
+}
 fn failure(e: BackendError) -> Reply {
+    let (status, value) = project_error(e);
+    reply(status, value)
+}
+fn project_error(e: BackendError) -> (u16, Value) {
     let mut source = if e.code().starts_with("external_gateway.") {
         "gateway"
     } else {
@@ -287,30 +372,16 @@ fn failure(e: BackendError) -> Reply {
             .get("outcomeUncertain")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        // Only machine-readable numeric bounds and identifier fields are safe to project.
-        if let Some(fields) = provider.get("details").and_then(Value::as_object) {
-            for key in [
-                "limit",
-                "maximum",
-                "minimum",
-                "actual",
-                "expected",
-                "retryAfterMs",
-                "field",
-                "reason",
-            ] {
-                if let Some(v) = fields.get(key)
-                    && (v.is_number()
-                        || v.is_boolean()
-                        || v.as_str().is_some_and(|s| {
-                            s.len() <= 128
-                                && !s.contains("eg1.")
-                                && s.bytes()
-                                    .all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b))
-                        }))
-                {
-                    details[key] = v.clone();
+        if let Some(fields) = provider.get("details").filter(|v| v.is_object()) {
+            fn depth(v: &Value) -> usize {
+                match v {
+                    Value::Object(m) => 1 + m.values().map(depth).max().unwrap_or(0),
+                    Value::Array(a) => 1 + a.iter().map(depth).max().unwrap_or(0),
+                    _ => 0,
                 }
+            }
+            if depth(fields) <= 8 && serde_json::to_vec(fields).is_ok_and(|b| b.len() <= 4096) {
+                details = fields.clone();
             }
         }
     }
@@ -330,7 +401,7 @@ fn failure(e: BackendError) -> Reply {
         "external_gateway.catalog_changed" | "port_catalog_changed" => 409,
         _ => 503,
     };
-    reply(
+    (
         status,
         json!({"error":{"source":source,"code":code,"retryable":retryable,"outcomeUncertain":uncertain,"details":details}}),
     )
@@ -349,6 +420,7 @@ struct ConnectionIo<S> {
     socket: S,
     prefix: std::io::Cursor<Vec<u8>>,
     write_deadline: Option<Pin<Box<tokio::time::Sleep>>>,
+    progress: Arc<Progress>,
 }
 impl ConnectionIo<TcpStream> {
     async fn admit(mut socket: TcpStream) -> io::Result<Self> {
@@ -393,6 +465,7 @@ impl ConnectionIo<TcpStream> {
                     socket,
                     prefix: std::io::Cursor::new(prefix),
                     write_deadline: None,
+                    progress: Default::default(),
                 });
             }
         }
@@ -415,9 +488,16 @@ impl<S: AsyncWrite + Unpin> ConnectionIo<S> {
     fn write_expired(&mut self, cx: &mut Context<'_>) -> bool {
         self.write_deadline
             .get_or_insert_with(|| {
-                Box::pin(tokio::time::sleep(Duration::from_secs(
-                    RESPONSE_WRITE_TIMEOUT as u64,
-                )))
+                let seconds = if self
+                    .progress
+                    .streaming
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                {
+                    STREAM_WRITE_SECONDS
+                } else {
+                    RESPONSE_WRITE_TIMEOUT
+                };
+                Box::pin(tokio::time::sleep(Duration::from_secs(seconds as u64)))
             })
             .as_mut()
             .poll(cx)
@@ -445,7 +525,23 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for ConnectionIo<S> {
         {
             return Poll::Ready(Err(io::ErrorKind::TimedOut.into()));
         }
-        Pin::new(&mut self.socket).poll_flush(cx)
+        let result = Pin::new(&mut self.socket).poll_flush(cx);
+        if matches!(result, Poll::Ready(Ok(())))
+            && self
+                .progress
+                .streaming
+                .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            self.write_deadline = None;
+            let mut waiter = self.progress.waiter.lock().expect("stream writer");
+            self.progress
+                .pending
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+            if let Some(waker) = waiter.take() {
+                waker.wake();
+            }
+        }
+        result
     }
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Pin::new(&mut self.socket).poll_shutdown(cx)
@@ -464,6 +560,7 @@ mod transport_tests {
             socket: writer,
             prefix: std::io::Cursor::new(vec![]),
             write_deadline: None,
+            progress: Default::default(),
         };
         io.flush().await.unwrap();
         tokio::time::advance(Duration::from_secs(25)).await;
@@ -500,7 +597,10 @@ mod observer_socket_tests {
         let server = tokio::spawn(async move {
             let (socket, _) = listener.accept().await.unwrap();
             entered.send(()).unwrap();
-            serve_application(socket, |_, _| std::future::ready(Ok(json!({})))).await;
+            serve_application(socket, |_, _| {
+                std::future::ready(Ok(Application::Json(json!({}))))
+            })
+            .await;
         });
         let mut client = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
         client.write_all(b"G").await.unwrap();
@@ -535,7 +635,7 @@ mod observer_socket_tests {
                 let ready = ready.clone();
                 async move {
                     ready.notify_one();
-                    observe(std::future::pending::<Result<Value, BackendError>>()).await
+                    observe(std::future::pending::<Result<Application, BackendError>>()).await
                 }
             })
             .await;
@@ -558,5 +658,76 @@ mod observer_socket_tests {
         assert!(bytes.starts_with(b"HTTP/1.1 504"));
         server.await.unwrap();
         clock_guard.abort();
+    }
+}
+
+#[cfg(test)]
+mod stream_transport_tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+    #[tokio::test(start_paused = true)]
+    async fn stream_flush_resets_write_clock_and_sparse_wait_does_not_start_it() {
+        let (writer, _reader) = tokio::io::duplex(1);
+        let progress = Arc::new(Progress::default());
+        progress
+            .streaming
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let mut io = ConnectionIo {
+            socket: writer,
+            prefix: std::io::Cursor::new(vec![]),
+            write_deadline: None,
+            progress,
+        };
+        io.write_all(b"x").await.unwrap();
+        io.flush().await.unwrap();
+        assert!(io.write_deadline.is_none());
+        tokio::time::advance(Duration::from_secs(30)).await;
+        io.flush().await.unwrap();
+        assert!(io.write_deadline.is_none());
+        let blocked = tokio::spawn(async move { io.write_all(b"y").await });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(4999)).await;
+        assert!(!blocked.is_finished());
+        tokio::time::advance(Duration::from_millis(1)).await;
+        assert_eq!(
+            blocked.await.unwrap().unwrap_err().kind(),
+            io::ErrorKind::TimedOut
+        );
+    }
+    #[tokio::test]
+    async fn stream_body_allows_only_one_waiting_frame_beyond_the_writer_owned_frame() {
+        let progress = Arc::new(Progress::default());
+        progress
+            .streaming
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let (sender, output) = crate::streams::channel(Default::default());
+        let mut body = StreamBody {
+            output,
+            progress: progress.clone(),
+        };
+        sender.send(Bytes::from_static(b"first\n")).await.unwrap();
+        assert_eq!(
+            body.frame().await.unwrap().unwrap().into_data().unwrap(),
+            "first\n"
+        );
+        sender.send(Bytes::from_static(b"second\n")).await.unwrap();
+        assert!(sender.try_send(Bytes::from_static(b"third\n")).is_err());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), body.frame())
+                .await
+                .is_err()
+        );
+        let (writer, _reader) = tokio::io::duplex(32);
+        let mut io = ConnectionIo {
+            socket: writer,
+            prefix: std::io::Cursor::new(vec![]),
+            write_deadline: None,
+            progress,
+        };
+        io.flush().await.unwrap();
+        assert_eq!(
+            body.frame().await.unwrap().unwrap().into_data().unwrap(),
+            "second\n"
+        );
     }
 }

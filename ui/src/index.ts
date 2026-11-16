@@ -14,7 +14,7 @@ export function mount(context: PackageMountContext): PackageUnmount {
   const statusArea = node("section", "Loading…"); statusArea.setAttribute("aria-live", "polite");
   const errorArea = node("p"); errorArea.setAttribute("role", "alert");
   const content = node("section");
-  article.append(node("h1", context.package.displayName), node("p", `Workspace: ${context.workspace.name} (${context.workspace.id})`), node("p", "Read-only · Person-authorized access"), nav, statusArea, errorArea, content);
+  article.append(node("h1", context.package.displayName), node("p", `Workspace: ${context.workspace.name} (${context.workspace.id})`), node("p", "Person-selected · Person-authorized access"), nav, statusArea, errorArea, content);
   context.root.append(article);
   let alive = true;
   let view = context.view;

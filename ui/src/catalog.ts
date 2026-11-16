@@ -29,7 +29,7 @@ export function catalogView(root: HTMLElement, client: Client, mutate: Mutation)
   const rows = node("section");
   const pages = node("nav"); pages.setAttribute("aria-label", "Catalog pages");
   root.append(node("h2", "Packages and exact tools"), node("p", "Enable only reviewed, displayed contracts. Package enable selects no tools; added tools stay off. Disable Package removes all its saved choices, including other pages. Polling refreshes this page every five seconds while settings is open."), action("Refresh", () => { void refresh(); }), message, error, rows, pages);
-  const eligible = (c: Contract) => c.available && c.provider !== null && c.guideEligibility === "eligible" && !c.excluded;
+  const eligible = (c: Contract) => c.available && c.provider !== null && c.guideEligibility === "eligible";
   const choices = (list: readonly Contract[]) => list.map(c => ({ contract: c.contract, major: c.major }));
   function render() {
     rows.replaceChildren(); pages.replaceChildren();
@@ -50,8 +50,7 @@ export function catalogView(root: HTMLElement, client: Client, mutate: Mutation)
       for (const contract of group) {
         const row = node("section");
         row.append(node("h4", `${contract.contract} · major ${contract.major}`), node("p", contract.selected ? "Package selected" : "Package off"));
-        if (contract.excluded) row.append(node("p", "Conversations is excluded from external access."));
-        else if (!contract.available) row.append(node("p", "Provider unavailable. Retained choices can be removed."));
+        if (!contract.available) row.append(node("p", "Provider unavailable. Retained choices can be removed."));
         else if (contract.guideEligibility !== "eligible") row.append(node("p", "Missing runtime guide: this contract cannot be enabled."));
         else {
           if (contract.selected && !contract.hostEnabled) row.append(node("p", "Host selection missing. Review and explicitly re-enable; it is never repaired automatically."));
@@ -59,14 +58,15 @@ export function catalogView(root: HTMLElement, client: Client, mutate: Mutation)
         }
         if (!contract.available && contract.provider === null && (contract.selected || contract.hostEnabled)) row.append(action(`Remove unavailable · ${contract.contract}`, () => { void mutate("external-gateway.package.set", { provider: contract.provider, enabled: false, contracts: choices([contract]) }); }));
         if (contract.contract === selected && eligible(contract)) {
-          row.append(node("p", "Guide included automatically when an ordinary read is selected. Commands, streams and events cannot be selected."));
+          row.append(node("p", "Guide included automatically when any operation is selected. All tokens share every selection; writes act as the local Workspace Person and can have lasting effects. Streams remain live until closed or denied."));
           for (const tool of tools) {
             const line = node("div");
-            line.append(node("code", tool.port), node("p", tool.reviewRequired ? "Review required: schema, Provider or major changed. Re-enable explicitly." : tool.selected ? "Selected" : "Off"));
+            const shape = tool.kind === "command" ? "Write" : tool.kind === "event" ? "Event" : tool.delivery === "stream" ? "Streaming query" : "Read";
+            line.append(node("strong", shape), node("code", tool.port), node("p", tool.reviewRequired ? "Review required: schema, Provider or major changed. Re-enable explicitly." : tool.selected ? "Selected" : "Off"));
             if (tool.eligible) {
-              line.append(action(`${tool.reviewRequired ? "Review and enable" : tool.selected ? "Disable" : "Enable"} ${tool.port}`, () => { void mutate("external-gateway.tool.set", { contract: contract.contract, major: contract.major, provider: contract.provider!, port: tool.port, fingerprint: tool.fingerprint, enabled: tool.reviewRequired || !tool.selected }); }));
+              line.append(action(`${tool.reviewRequired ? "Review and enable" : tool.selected ? "Disable" : "Enable"} ${shape.toLowerCase()} ${tool.port}`, () => { void mutate("external-gateway.tool.set", { contract: contract.contract, major: contract.major, provider: contract.provider!, port: tool.port, fingerprint: tool.fingerprint, enabled: tool.reviewRequired || !tool.selected }); }));
               if (tool.reviewRequired) line.append(action(`Disable ${tool.port}`, () => { void mutate("external-gateway.tool.set", { contract: contract.contract, major: contract.major, provider: contract.provider!, port: tool.port, fingerprint: tool.fingerprint, enabled: false }); }));
-            } else line.append(node("p", tool.port === "runtime.guide" ? "Required guide" : "Not an ordinary read"));
+            } else line.append(node("p", tool.port === "runtime.guide" ? "Required guide" : "Unsupported shape"));
             row.append(line);
           }
           if (offset) row.append(action("First tools", () => { offset = 0; navigate(); }));

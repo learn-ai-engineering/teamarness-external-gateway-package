@@ -75,5 +75,155 @@
         }
       }
     }
+  },
+  {
+    "definition": "manifest",
+    "value": {
+      "version": 1,
+      "readOnly": false,
+      "workspace": {
+        "id": "workspace1",
+        "name": "Example"
+      },
+      "routes": {
+        "contracts": "/v1/contracts",
+        "onboarding": "/v1/onboarding",
+        "call": "/v1/call",
+        "subscribe": "/v1/subscribe"
+      },
+      "limits": {
+        "outstandingSdkInvocations": 12,
+        "portValueBytes": 262144,
+        "metadataBytes": 1048576,
+        "toolWaitSeconds": 25,
+        "streams": 8,
+        "streamHeartbeatSeconds": 15,
+        "streamWriteSeconds": 5,
+        "streamFrameAllowanceBytes": 4096
+      },
+      "supportedShapes": [
+        {
+          "kind": "query",
+          "delivery": "response"
+        },
+        {
+          "kind": "command",
+          "delivery": "response"
+        },
+        {
+          "kind": "query",
+          "delivery": "stream"
+        },
+        {
+          "kind": "event",
+          "delivery": "stream"
+        }
+      ]
+    }
+  },
+  {
+    "definition": "subscribe",
+    "value": {
+      "contract": "dev.example.sample",
+      "major": 1,
+      "port": "sample.events",
+      "request": null
+    }
+  },
+  {
+    "definition": "ready",
+    "value": {
+      "type": "ready",
+      "contract": "dev.example.sample",
+      "major": 1,
+      "port": "sample.events",
+      "kind": "event",
+      "delivery": "stream"
+    }
+  },
+  {
+    "definition": "value",
+    "value": {
+      "type": "value",
+      "value": null
+    }
+  },
+  {
+    "definition": "value",
+    "value": {
+      "type": "value",
+      "value": 42
+    }
+  },
+  {
+    "definition": "value",
+    "value": {
+      "type": "value",
+      "value": false
+    }
+  },
+  {
+    "definition": "value",
+    "value": {
+      "type": "value",
+      "value": "text"
+    }
+  },
+  {
+    "definition": "value",
+    "value": {
+      "type": "value",
+      "value": [
+        1,
+        null
+      ]
+    }
+  },
+  {
+    "definition": "value",
+    "value": {
+      "type": "value",
+      "value": {
+        "type": "end",
+        "reason": "completed"
+      }
+    }
+  },
+  {
+    "definition": "value",
+    "value": {
+      "type": "value",
+      "value": {
+        "$teamarnessPortEnvelope": 1,
+        "$teamarnessPortValue": null
+      }
+    }
+  },
+  {
+    "definition": "heartbeat",
+    "value": {
+      "type": "heartbeat"
+    }
+  },
+  {
+    "definition": "endCompleted",
+    "value": {
+      "type": "end",
+      "reason": "completed"
+    }
+  },
+  {
+    "definition": "endError",
+    "value": {
+      "type": "end",
+      "reason": "error",
+      "error": {
+        "source": "host",
+        "code": "provider_exited",
+        "retryable": false,
+        "outcomeUncertain": false,
+        "details": {}
+      }
+    }
   }
 ]

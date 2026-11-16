@@ -49,6 +49,7 @@ impl Provider {
     }
     pub fn call(&mut self, method: &str, p: Value) -> Result<Value, BackendError> {
         assert_eq!(p["access"], "person");
+        let contract = self.document["contracts"][0]["identity"].clone();
         let bytes = serde_json::to_vec(&self.document).unwrap();
         let digest: String = Sha256::digest(&bytes)
             .iter()
@@ -56,7 +57,7 @@ impl Provider {
             .collect();
         match method {
             "available" => Ok(
-                json!({"contracts":[{"contract":"dev.test.reads","major":self.major,"minor":0,"description":"Reads","available":true,"enabled":self.enabled,"enabledMajor":self.enabled.then_some(self.major),"metadataSha256":digest,"provider":{"identity":self.provider,"version":"1.0.0","displayName":"Unknown","description":null},"guideEligibility":"eligible","routeRevision":"a".repeat(64)}]}),
+                json!({"contracts":[{"contract":contract,"major":self.major,"minor":0,"description":"Reads","available":true,"enabled":self.enabled,"enabledMajor":self.enabled.then_some(self.major),"metadataSha256":digest,"provider":{"identity":self.provider,"version":"1.0.0","displayName":"Unknown","description":null},"guideEligibility":"eligible","routeRevision":"a".repeat(64)}]}),
             ),
             "describe" => {
                 assert_eq!(p["routeRevision"], "a".repeat(64));
@@ -73,9 +74,7 @@ impl Provider {
             "enable" => {
                 assert_eq!(p["routeRevision"], "a".repeat(64));
                 self.enabled = true;
-                Ok(
-                    json!({"access":"person","contract":"dev.test.reads","major":self.major,"enabled":true}),
-                )
+                Ok(json!({"access":"person","contract":contract,"major":self.major,"enabled":true}))
             }
             "disable" => {
                 if self.cleanup_fails {
@@ -86,7 +85,14 @@ impl Provider {
             }
             "invoke" => {
                 assert_eq!(p["routeRevision"], "a".repeat(64));
-                assert_eq!(p["kind"], "query");
+                assert_eq!(
+                    p["kind"],
+                    if p["port"] == "write.item" {
+                        "command"
+                    } else {
+                        "query"
+                    }
+                );
                 self.invocations += 1;
                 if let Some(e) = &self.failure {
                     return Err(e.clone());

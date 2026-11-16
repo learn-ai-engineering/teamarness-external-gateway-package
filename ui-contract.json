@@ -164,9 +164,6 @@
             "missing",
             "unavailable"
           ]
-        },
-        "excluded": {
-          "type": "boolean"
         }
       },
       "required": [
@@ -177,8 +174,7 @@
         "available",
         "hostEnabled",
         "selected",
-        "guideEligibility",
-        "excluded"
+        "guideEligibility"
       ],
       "additionalProperties": false
     },
@@ -202,6 +198,19 @@
         },
         "reviewRequired": {
           "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "query",
+            "command",
+            "event"
+          ]
+        },
+        "delivery": {
+          "enum": [
+            "response",
+            "stream"
+          ]
         }
       },
       "required": [
@@ -209,7 +218,9 @@
         "fingerprint",
         "eligible",
         "selected",
-        "reviewRequired"
+        "reviewRequired",
+        "kind",
+        "delivery"
       ],
       "additionalProperties": false
     }
