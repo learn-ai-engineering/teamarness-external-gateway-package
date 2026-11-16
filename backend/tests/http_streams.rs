@@ -342,6 +342,81 @@ async fn held_confirmed_open_has_no_http_success_until_ready_and_refusals_stay_j
     f.dispose().await;
 }
 #[tokio::test]
+async fn confirmed_opening_refusals_attribute_provider_host_sdk_and_gateway_without_ready() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let dir = tempfile::tempdir().unwrap();
+        let mut f = duplex::Fixture::start(
+            dir.path(),
+            Arc::new(Mutex::new(Provider::new())),
+            true,
+            None,
+        )
+        .await;
+        f.select("watch.item", true).await;
+        f.select("items.changed", true).await;
+        let (port, bearer) = f.enable().await;
+        let mut mismatches = Vec::new();
+        for name in ["watch.item", "items.changed"] {
+            for (code, source, status, retryable) in [
+                ("fixture.setup_refused", "provider", 503, false),
+                ("provider_exited", "host", 503, false),
+                ("port_not_enabled", "host", 503, false),
+                ("overloaded", "host", 503, true),
+                ("cancelled", "host", 503, false),
+                ("package.unknown_subscription", "host", 503, false),
+                ("external_gateway.too_large", "gateway", 413, false),
+                ("deadline_exceeded", "host", 504, true),
+                ("port_catalog_changed", "host", 409, false),
+            ] {
+                let mut s = open(
+                    port,
+                    &bearer,
+                    name,
+                    if name == "watch.item" {
+                        json!({})
+                    } else {
+                        Value::Null
+                    },
+                )
+                .await;
+                let (id, _) = f.opens.recv().await.unwrap();
+                let mut byte = [0];
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(25), s.read(&mut byte))
+                        .await
+                        .is_err(),
+                    "no HTTP bytes before refusal: {name}: {code}"
+                );
+                f.peer.close(&id, code).await;
+                let head = headers(&mut s).await;
+                assert!(head.starts_with(&format!("HTTP/1.1 {status}")), "{head}");
+                assert!(head.contains("application/json"));
+                let mut body = String::new();
+                s.read_to_string(&mut body).await.unwrap();
+                assert!(!body.contains("\"ready\""));
+                let value: Value = serde_json::from_str(&body).unwrap();
+                assert_eq!(value["error"]["code"], code);
+                assert_eq!(value["error"]["retryable"], retryable);
+                assert_eq!(value["error"]["outcomeUncertain"], false);
+                assert_eq!(value["error"]["details"], json!({}));
+                if value["error"]["source"] != source {
+                    mismatches.push(format!(
+                        "{name}: {code} expected {source}, received {}",
+                        value["error"]["source"]
+                    ));
+                }
+            }
+        }
+        f.dispose().await;
+        assert!(
+            mismatches.is_empty(),
+            "ownership mismatches: {mismatches:?}"
+        );
+    })
+    .await
+    .unwrap();
+}
+#[tokio::test]
 async fn abandoned_open_keeps_its_slot_until_late_confirmation_then_closes() {
     let dir = tempfile::tempdir().unwrap();
     let mut f = duplex::Fixture::start(
