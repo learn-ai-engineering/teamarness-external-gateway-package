@@ -339,6 +339,24 @@ fn reply(status: u16, value: Value) -> Reply {
 pub(crate) fn error_value(e: BackendError) -> Value {
     project_error(e).1["error"].clone()
 }
+// Stream-close carries only a code. Package authors namespace their codes;
+// bare Host codes and the reserved SDK/gateway namespaces retain their owner.
+pub(crate) fn stream_error_value(e: BackendError) -> Value {
+    let provider = e.code().split_once('.').is_some_and(|(namespace, name)| {
+        !namespace.is_empty()
+            && !name.is_empty()
+            && !matches!(namespace, "package" | "external_gateway")
+            && e.code().len() <= 128
+            && e.code()
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-".contains(&b))
+    });
+    let mut value = error_value(e);
+    if provider {
+        value["source"] = json!("provider");
+    }
+    value
+}
 fn failure(e: BackendError) -> Reply {
     let (status, value) = project_error(e);
     reply(status, value)

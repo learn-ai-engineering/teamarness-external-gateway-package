@@ -145,7 +145,7 @@ pub(crate) async fn forward(
                 }
             }
             Some(Some(Err(e))) => (
-                json!({"type":"end","reason":"error","error":crate::http::error_value(e)}),
+                json!({"type":"end","reason":"error","error":crate::http::stream_error_value(e)}),
                 None,
                 true,
             ),

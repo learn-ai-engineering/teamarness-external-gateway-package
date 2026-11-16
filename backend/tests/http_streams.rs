@@ -786,3 +786,51 @@ async fn lost_opening_socket_late_success_closes_instead_of_leaking_or_reviving(
     drop(fresh);
     f.dispose().await;
 }
+
+#[tokio::test]
+async fn stream_terminals_attribute_provider_host_sdk_and_gateway_without_invented_details() {
+    for name in ["watch.item", "items.changed"] {
+        for (code, source) in [
+            ("proof.stream_failed", "provider"),
+            ("provider_exited", "host"),
+            ("port_not_enabled", "host"),
+            ("overloaded", "host"),
+            ("cancelled", "host"),
+            ("host_unavailable", "host"),
+            ("package.unknown_subscription", "host"),
+            ("external_gateway.too_large", "gateway"),
+        ] {
+            let (_dir, h, script, port, bearer) = setup().await;
+            let mut s = open(
+                port,
+                &bearer,
+                name,
+                if name == "watch.item" {
+                    json!({})
+                } else {
+                    Value::Null
+                },
+            )
+            .await;
+            assert!(headers(&mut s).await.starts_with("HTTP/1.1 200"));
+            assert_eq!(frame(&mut s).await["type"], "ready");
+            assert!(script.stream().send(json!({"$teamarnessPortEnvelope":1,"$teamarnessPortValue":{"source":"host","code":"provider_exited"}})).await);
+            assert_eq!(
+                frame(&mut s).await,
+                json!({"type":"value","value":{"source":"host","code":"provider_exited"}})
+            );
+            script.stream().close(code).await;
+            let end = frame(&mut s).await;
+            assert_eq!(end["reason"], "error");
+            assert_eq!(end["error"]["source"], source, "{name}: {code}");
+            assert_eq!(end["error"]["code"], code);
+            assert_eq!(end["error"]["details"], json!({}));
+            assert_eq!(end["error"]["outcomeUncertain"], false);
+            if source == "provider" {
+                assert_eq!(end["error"]["retryable"], false);
+            }
+            drop(s);
+            h.shutdown().await.unwrap();
+        }
+    }
+}
