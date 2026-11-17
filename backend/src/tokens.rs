@@ -74,9 +74,12 @@ fn decode<const N: usize>(value: &str) -> Option<[u8; N]> {
     }
     bytes.try_into().ok()
 }
+pub(crate) fn valid_id(id: &str) -> bool {
+    decode::<16>(id).is_some()
+}
 impl TokenRecord {
     pub fn valid(&self) -> bool {
-        decode::<16>(&self.id).is_some()
+        valid_id(&self.id)
             && self.generation > 0
             && !self.label.is_empty()
             && self.label.len() <= 96

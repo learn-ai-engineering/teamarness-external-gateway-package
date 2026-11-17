@@ -90,7 +90,7 @@ impl Connection {
         }
         Ok(())
     }
-    fn same_origin(&self, other: &Self) -> bool {
+    pub(crate) fn same_origin(&self, other: &Self) -> bool {
         self.workspace_id == other.workspace_id
             && self.installation_id == other.installation_id
             && self.continuity_id == other.continuity_id
@@ -215,7 +215,7 @@ impl ClientStore {
                     return Err(StorageError::Capacity);
                 }
                 records.push(Self::read_record(dir, name)?);
-            } else if name == "managed" {
+            } else if ["managed", "setup"].contains(&name) {
                 let managed: File = io(sys::openat(dir, name, DIR, Mode::empty()))?.into();
                 stat(&managed, true, true)?;
             } else if ![".", "..", "store.lock", "record.tmp"].contains(&name) {
@@ -263,6 +263,11 @@ impl ClientStore {
     }
     fn mutate(&self, c: &Connection, observed: Option<&Connection>) -> Result<(), StorageError> {
         c.validate()?;
+        let guard = self.lock()?;
+        guard.publish(c, observed)
+    }
+    /// Nonwaiting cross-process owner. Setup acquires this before any Policy mutation.
+    pub fn lock(&self) -> Result<ClientMutation<'_>, StorageError> {
         let dir = self.directory(true)?.ok_or(StorageError::Io)?;
         let lock: File = io(sys::openat(
             &dir,
@@ -276,7 +281,40 @@ impl ClientStore {
             &lock,
             sys::FlockOperation::NonBlockingLockExclusive,
         ))?;
-        let records = Self::records(&dir)?;
+        Ok(ClientMutation {
+            store: self,
+            dir,
+            _lock: lock,
+        })
+    }
+    /// Setup publication preserves the Workspace's origin tuple; it cannot implicitly transfer profiles.
+    pub fn publish(&self, connection: &Connection) -> Result<(), StorageError> {
+        self.mutate(connection, None)
+    }
+    /// Compare the entire resolved record under the write lock; stale name refresh cannot undo rotation.
+    pub fn refresh_name(&self, observed: &Connection, name: &str) -> Result<(), StorageError> {
+        let mut next = observed.clone();
+        next.workspace_name = name.into();
+        self.mutate(&next, Some(observed))
+    }
+}
+pub struct ClientMutation<'a> {
+    store: &'a ClientStore,
+    dir: File,
+    _lock: File,
+}
+impl ClientMutation<'_> {
+    pub fn connections(&self) -> Result<Vec<Connection>, StorageError> {
+        ClientStore::records(&self.dir)
+    }
+    pub fn publish(
+        &self,
+        c: &Connection,
+        observed: Option<&Connection>,
+    ) -> Result<(), StorageError> {
+        c.validate()?;
+        let dir = &self.dir;
+        let records = ClientStore::records(dir)?;
         let old = records.iter().find(|r| r.workspace_id == c.workspace_id);
         if old.is_some_and(|r| !r.same_origin(c)) {
             return Err(StorageError::Invalid);
@@ -289,17 +327,17 @@ impl ClientStore {
         if old.is_none() && records.len() == MAX_RECORDS {
             return Err(StorageError::Capacity);
         }
-        match sys::openat(&dir, "record.tmp", READ, Mode::empty()) {
+        match sys::openat(dir, "record.tmp", READ, Mode::empty()) {
             Ok(fd) => {
                 let f: File = fd.into();
                 stat(&f, false, true)?;
-                io(sys::unlinkat(&dir, "record.tmp", sys::AtFlags::empty()))?;
+                io(sys::unlinkat(dir, "record.tmp", sys::AtFlags::empty()))?;
             }
             Err(rustix::io::Errno::NOENT) => {}
             Err(_) => return Err(StorageError::Unsafe),
         }
         let mut f: File = io(sys::openat(
-            &dir,
+            dir,
             "record.tmp",
             OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
             Mode::RUSR | Mode::WUSR,
@@ -308,33 +346,48 @@ impl ClientStore {
         stat(&f, false, true)?;
         let bytes = io(serde_json::to_vec(c))?;
         let result = (|| {
-            self.stage(WriteStage::Write)?;
+            self.store.stage(WriteStage::Write)?;
             io(f.write_all(&bytes))?;
-            self.stage(WriteStage::FileSync)?;
+            self.store.stage(WriteStage::FileSync)?;
             io(f.sync_all())?;
-            self.stage(WriteStage::Rename)?;
+            self.store.stage(WriteStage::Rename)?;
             io(sys::renameat(
-                &dir,
+                dir,
                 "record.tmp",
-                &dir,
-                Self::filename(&c.workspace_id),
+                dir,
+                ClientStore::filename(&c.workspace_id),
             ))?;
-            self.stage(WriteStage::DirectorySync)?;
+            self.store.stage(WriteStage::DirectorySync)?;
             io(dir.sync_all())
         })();
         if result.is_err() {
-            let _ = sys::unlinkat(&dir, "record.tmp", sys::AtFlags::empty());
+            let _ = sys::unlinkat(dir, "record.tmp", sys::AtFlags::empty());
         }
         result
     }
-    /// Setup publication preserves the Workspace's origin tuple; it cannot implicitly transfer profiles.
-    pub fn publish(&self, connection: &Connection) -> Result<(), StorageError> {
-        self.mutate(connection, None)
-    }
-    /// Compare the entire resolved record under the write lock: concurrent rotation cannot be undone by a name refresh.
-    pub fn refresh_name(&self, observed: &Connection, name: &str) -> Result<(), StorageError> {
-        let mut next = observed.clone();
-        next.workspace_name = name.into();
-        self.mutate(&next, Some(observed))
+    /// Exact operation identity: a concurrent replacement/name refresh is never blindly deleted.
+    pub fn remove_matching(&self, expected: &Connection) -> Result<(), StorageError> {
+        let records = self.connections()?;
+        let Some(current) = records
+            .iter()
+            .find(|c| c.workspace_id == expected.workspace_id)
+        else {
+            return Ok(());
+        };
+        if !current.same_origin(expected)
+            || current.token_id != expected.token_id
+            || current.generation != expected.generation
+            || current.operation_id != expected.operation_id
+        {
+            return Err(StorageError::Invalid);
+        }
+        self.store.stage(WriteStage::Rename)?;
+        io(sys::unlinkat(
+            &self.dir,
+            ClientStore::filename(&expected.workspace_id),
+            sys::AtFlags::empty(),
+        ))?;
+        self.store.stage(WriteStage::DirectorySync)?;
+        io(self.dir.sync_all())
     }
 }

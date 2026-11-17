@@ -76,6 +76,9 @@ pub struct Admitted {
     digest: String,
 }
 impl Admitted {
+    pub(crate) fn installation_identity(&self) -> &str {
+        &self.owner
+    }
     pub fn from_initialization(init: &teamarness_package_sdk::Initialization) -> Result<Self> {
         if init.package().identity != "dev.teamarness.external-gateway"
             || init.package().version != crate::PACKAGE_VERSION
@@ -450,7 +453,7 @@ pub(crate) fn observed(output: &Path, receipt: &Path, kind: Kind) -> Result<Obse
     }
     Ok(result)
 }
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CommandPlan {
     source: PathBuf,
     output: PathBuf,
@@ -462,11 +465,74 @@ pub struct CommandPlan {
     pending: Option<Vec<u8>>,
 }
 impl CommandPlan {
+    pub(crate) fn recheck(&self, installer: &ManagedInstaller) -> Result<()> {
+        if installer.preview(&self.source, self.admission.clone())? != *self {
+            return Err(InstallError::StalePreview);
+        }
+        Ok(())
+    }
+    pub(crate) fn after_preparation(&self, installer: &ManagedInstaller) -> Result<Self> {
+        self.parent.existing_check()?;
+        self.state.existing_check()?;
+        let new = installer.preview(&self.source, self.admission.clone())?;
+        if self.old != new.old || self.pending != new.pending || self.disposition != new.disposition
+        {
+            return Err(InstallError::StalePreview);
+        }
+        Ok(new)
+    }
     pub fn disposition(&self) -> Disposition {
         self.disposition
     }
     pub fn command_path(&self) -> &Path {
         &self.output
+    }
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandVersion {
+    installation: String,
+    version: String,
+    sha256: String,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandChange {
+    disposition: &'static str,
+    installed: Option<CommandVersion>,
+    proposed: CommandVersion,
+}
+impl CommandPlan {
+    /// Secret-free consent facts, not permission inferred from a token label or a filesystem manifest.
+    pub fn summary(&self) -> Result<CommandChange> {
+        let installed = self
+            .old
+            .receipt
+            .as_ref()
+            .map(|bytes| {
+                let r: Receipt = parse(bytes)?;
+                r.validate(Kind::Command)?;
+                Ok(CommandVersion {
+                    installation: r.admission.owner,
+                    version: r.admission.version,
+                    sha256: r.installed_digest,
+                })
+            })
+            .transpose()?;
+        Ok(CommandChange {
+            disposition: match self.disposition {
+                Disposition::Install => "install",
+                Disposition::Unchanged => "unchanged",
+                Disposition::Refresh => "refresh",
+                Disposition::ExplicitRepair => "explicit-repair",
+            },
+            installed,
+            proposed: CommandVersion {
+                installation: self.admission.owner.clone(),
+                version: self.admission.version.clone(),
+                sha256: self.admission.digest.clone(),
+            },
+        })
     }
 }
 /// This object has no authorization methods. Construction/preview never creates a directory.

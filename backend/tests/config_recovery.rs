@@ -1,4 +1,5 @@
-//! AC13/AC15: real process interruption, never promotion of uncommitted settings.
+// AC13/AC15: real process interruption, never promotion of uncommitted settings.
+use http_support::backend_environment;
 mod http_support;
 use http_support::*;
 use serde_json::json;
@@ -123,9 +124,7 @@ async fn interrupted_settings_save_recovers_committed_listener_and_durable_mutat
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cancelled_observer_cannot_reclaim_a_live_writers_temp() {
-    use teamarness_generated_package_backend::{
-        State, policy::Change, router_with_storage_fault, tokens::OsEntropy,
-    };
+    use teamarness_generated_package_backend::{State, policy::Change, tokens::OsEntropy};
     use teamarness_package_sdk::{Context, Empty};
     struct PausedWrite(Arc<Mutex<Option<Arc<Pause>>>>);
     impl StorageFault for PausedWrite {
@@ -145,7 +144,7 @@ async fn cancelled_observer_cannot_reclaim_a_live_writers_temp() {
     let armed = Arc::new(Mutex::new(None));
     let (send, recv) = tokio::sync::oneshot::channel();
     let send = Arc::new(Mutex::new(Some(send)));
-    let router = router_with_storage_fault(
+    let router = backend_environment::router_with_storage_fault(
         Arc::new(OsEntropy),
         Some(Arc::new(PausedWrite(armed.clone()))),
     )

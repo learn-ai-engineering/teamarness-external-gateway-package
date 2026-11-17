@@ -1,7 +1,10 @@
 //! Single shared durable authorization owner. Cancelled observers never release write ownership.
 use crate::{
     catalog::{Catalog, Observed, Shape},
-    config::{Config, ContractSelection, FileStore, MAX_TOKENS, ToolSelection},
+    config::{
+        Config, ContractSelection, FileStore, MAX_TOKENS, ManagedAssociation, ManagedDisposition,
+        ToolSelection,
+    },
     error,
     tokens::{self, Entropy},
 };
@@ -56,6 +59,7 @@ enum CallOutput {
     Guide,
 }
 struct Inner {
+    revision: u64,
     config: Config,
     storage_failed: bool,
     warning: Option<&'static str>,
@@ -91,6 +95,7 @@ impl Policy {
             .map_err(|_| error("storage_failed"))?
             .map_err(|_| error("storage_failed"))?;
         let inner = Inner {
+            revision: 0,
             config,
             storage_failed: false,
             warning: None,
@@ -250,6 +255,142 @@ impl Policy {
         }
         Ok(())
     }
+    pub async fn read_setup_origin(&self) -> Result<Option<String>, BackendError> {
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || store.read_origin())
+            .await
+            .map_err(|_| error("storage_failed"))?
+            .map_err(|_| error("storage_failed"))
+    }
+    pub async fn setup_origin(&self) -> Result<String, BackendError> {
+        let store = self.store.clone();
+        let entropy = self.entropy.clone();
+        tokio::task::spawn_blocking(move || store.setup_origin(entropy.as_ref()))
+            .await
+            .map_err(|_| error("storage_failed"))?
+            .map_err(|_| error("storage_failed"))
+    }
+    /// Snapshot contains no bearer. Setup compares the complete current policy, including tombstones.
+    pub async fn setup_snapshot(&self) -> Result<SetupSnapshot, BackendError> {
+        let owner = self.inner.lock().await;
+        if owner.storage_failed {
+            return Err(error("storage_failed"));
+        }
+        let config = owner.config.clone();
+        let serial = owner.revision;
+        let running = owner.listener.is_some() && self.can_listen();
+        drop(owner);
+        let (revision, durable_revision) = revision(config.clone(), serial).await?;
+        Ok(SetupSnapshot {
+            revision,
+            durable_revision,
+            config,
+            running,
+        })
+    }
+    /// Only coordinator-prepared verifier material enters here. No UI handler exposes this operation.
+    pub async fn commit_managed(
+        self: &Arc<Self>,
+        expected: String,
+        association: ManagedAssociation,
+        record: Option<tokens::TokenRecord>,
+    ) -> Result<(), BackendError> {
+        if !self.active.load(Ordering::SeqCst) {
+            return Err(error("unavailable"));
+        }
+        let mut owner = self
+            .inner
+            .clone()
+            .try_lock_owned()
+            .map_err(|_| error("busy"))?;
+        let this = self.clone();
+        tokio::spawn(async move {
+            if owner.storage_failed {
+                return Err(error("storage_failed"));
+            }
+            let current = revision(owner.config.clone(), owner.revision).await?.0;
+            // Idempotence cannot reintroduce authority removed after this exact commit.
+            if owner.config.managed.as_ref() == Some(&association)
+                && record.as_ref().is_none_or(|r| {
+                    owner.config.tokens.iter().any(|t| {
+                        t.id == r.id && t.generation == r.generation && t.verifier == r.verifier
+                    })
+                })
+            {
+                return Ok(());
+            }
+            if current != expected {
+                return Err(error("setup_preview_stale"));
+            }
+            let mut next = owner.config.clone();
+            if let Some(r) = record {
+                if association.disposition != ManagedDisposition::Current
+                    || association.token_id != r.id
+                    || association.generation != r.generation
+                    || !r.valid()
+                {
+                    return Err(error("bad_request"));
+                }
+                if let Some(old) = &next.managed {
+                    let intact = old.disposition == ManagedDisposition::Current
+                        && r.generation == old.generation
+                        && next.tokens.iter().any(|t| {
+                            t.id == r.id && t.generation == r.generation && t.verifier == r.verifier
+                        });
+                    if old.token_id != r.id
+                        || old.origin_nonce != association.origin_nonce
+                        || (!intact
+                            && r.generation
+                                != old
+                                    .generation
+                                    .checked_add(1)
+                                    .ok_or_else(|| error("too_large"))?)
+                    {
+                        return Err(error("conflict"));
+                    }
+                    next.tokens.retain(|t| t.id != old.token_id);
+                } else if r.generation != 1 || next.tokens.iter().any(|t| t.id == r.id) {
+                    return Err(error("conflict"));
+                }
+                if next.tokens.len() >= MAX_TOKENS {
+                    return Err(error("too_large"));
+                }
+                next.tokens.push(r);
+            } else {
+                let old = next.managed.as_ref().ok_or_else(|| error("not_found"))?;
+                if association.token_id != old.token_id
+                    || association.generation != old.generation
+                    || association.origin_nonce != old.origin_nonce
+                    || association.disposition == ManagedDisposition::Current
+                {
+                    return Err(error("conflict"));
+                }
+                next.tokens.retain(|t| t.id != association.token_id);
+            }
+            next.config_version = 2;
+            next.managed = Some(association);
+            let result = this.persist(&mut owner, next).await;
+            this.publish_status(&owner);
+            result
+        })
+        .await
+        .map_err(|_| error("storage_failed"))?
+    }
+    pub async fn managed_current(
+        &self,
+        association: &ManagedAssociation,
+        record: &tokens::TokenRecord,
+    ) -> bool {
+        let owner = self.inner.lock().await;
+        !owner.storage_failed
+            && owner.config.managed.as_ref() == Some(association)
+            && association.disposition == ManagedDisposition::Current
+            && owner.config.tokens.iter().any(|t| {
+                t.id == record.id
+                    && t.generation == record.generation
+                    && t.verifier == record.verifier
+            })
+    }
     pub async fn external_page(
         &self,
         bearer: &str,
@@ -312,6 +453,10 @@ impl Policy {
     }
     async fn persist(&self, inner: &mut Inner, next: Config) -> Result<(), BackendError> {
         next.validate().map_err(|_| error("too_large"))?;
+        inner.revision = inner
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| error("unavailable"))?;
         let denied = denial_intersection(&inner.config, &next);
         let store = self.store.clone();
         let to_write = next.clone();
@@ -387,6 +532,9 @@ impl Policy {
                 json!({"id":id,"bearer":bearer})
             }
             Change::Regenerate(id) => {
+                if next.managed.as_ref().is_some_and(|m| m.token_id == id) {
+                    return Err(error("managed_setup_required"));
+                }
                 let old = next
                     .tokens
                     .iter_mut()
@@ -403,10 +551,16 @@ impl Policy {
                 json!({"id":id,"bearer":bearer})
             }
             Change::Revoke(id) => {
+                if let Some(m) = next.managed.as_mut().filter(|m| m.token_id == id) {
+                    m.disposition = ManagedDisposition::Revoked;
+                }
                 next.tokens.retain(|t| t.id != id);
                 ok()
             }
             Change::DisableAll => {
+                if let Some(m) = &mut next.managed {
+                    m.disposition = ManagedDisposition::Revoked;
+                }
                 next.desired_enabled = false;
                 next.tokens.clear();
                 cleanup.extend(next.contracts.keys().cloned());
@@ -920,6 +1074,22 @@ impl Policy {
         Ok(json!({"contracts":rows,"nextCursor":page.next_cursor,"tools":[],"nextOffset":null}))
     }
 }
+pub struct SetupSnapshot {
+    pub revision: String,
+    pub durable_revision: String,
+    pub config: Config,
+    pub running: bool,
+}
+async fn revision(config: Config, serial: u64) -> Result<(String, String), BackendError> {
+    tokio::task::spawn_blocking(move || {
+        let mut bytes = serde_json::to_vec(&config).map_err(|_| error("storage_failed"))?;
+        let durable = crate::catalog::digest(&bytes);
+        bytes.extend_from_slice(&serial.to_be_bytes());
+        Ok((crate::catalog::digest(&bytes), durable))
+    })
+    .await
+    .map_err(|_| error("storage_failed"))?
+}
 fn ok() -> Value {
     json!({"ok":true,"warning":null})
 }
@@ -977,7 +1147,7 @@ fn status_value(inner: &Inner) -> Value {
         .config
         .tokens
         .iter()
-        .map(|t| json!({"id":t.id,"label":t.label,"generation":t.generation}))
+        .map(|t| json!({"id":t.id,"label":t.label,"generation":t.generation,"managed":inner.config.managed.as_ref().is_some_and(|m|m.token_id==t.id)}))
         .collect();
     json!({"desiredEnabled":inner.config.desired_enabled,"port":inner.config.port,"running":inner.listener.is_some(),"storageFailed":inner.storage_failed,"warning":inner.warning,"tokens":tokens,"selectedContracts":inner.config.contracts.len(),"selectedTools":inner.config.contracts.values().map(|c|c.tools.len()).sum::<usize>()})
 }
@@ -1007,6 +1177,22 @@ fn denial_intersection(old: &Config, next: &Config) -> Config {
         });
         true
     });
+    // Retain denial tombstones on uncertain writes; a later unrelated write cannot restore a proposal.
+    if next
+        .managed
+        .as_ref()
+        .is_some_and(|m| m.disposition != ManagedDisposition::Current)
+    {
+        safe.managed = next.managed.clone();
+        safe.config_version = next.config_version;
+    } else if let Some(m) = &mut safe.managed
+        && !safe
+            .tokens
+            .iter()
+            .any(|t| t.id == m.token_id && t.generation == m.generation)
+    {
+        m.disposition = ManagedDisposition::Revoked;
+    }
     safe
 }
 

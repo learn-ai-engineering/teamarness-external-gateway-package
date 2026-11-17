@@ -43,7 +43,12 @@ The native CLI supports explicit Workspace selection, live contract/schema/guide
 discovery, calls and confirmed observations; see the Package's CLI documentation.
 The embedded portable skill uses a safely quoted absolute command, not raw HTTP
 or copied Provider contracts. Managed command/selected-skill publication modules
-do not by themselves authorize access; app-led setup is a separate operation.
+do not by themselves authorize access; the typed Backend setup coordinator
+previews consent, commits managed authority through Policy and publishes private
+client access. Production picker/UI integration follows separately. Cancelling an
+observer does not undo accepted work; inspect status and repair partial effects.
+Managed rotation uses the coordinator, never manual one-time regeneration.
+Disconnect revokes before local cleanup; local deletion alone is not revocation.
 Only recognized unmodified outputs may be refreshed. Edited/unrelated output is
 a collision to resolve outside setup, never an overwrite prompt. Skill discovery
 and observation lifetime depend on the actual external harness; no universal

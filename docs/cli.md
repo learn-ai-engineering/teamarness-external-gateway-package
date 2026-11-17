@@ -198,8 +198,7 @@ cargo build --locked -p teamarness-generated-package-backend --example cli-fixtu
 `TEAMARNESS_FIXTURE_HOME` to name an absolute physical private test root. It has
 no fallback. Cargo's `target/debug/examples/cli-fixture` (or its configured target
 directory) is **not assembled into dist**. Fixture-backed tests do not qualify
-production home resolution or an acquired installed artifact. Later Backend
-setup fixtures must inject the same isolation, not just the CLI. Real installed
+production home resolution or an acquired installed artifact. The Backend fixture described below injects the same isolation, not just the CLI. Real installed
 qualification uses a disposable OS account/home; never exercise setup in Don's
 ordinary `~/.local` state. Manual M1–M5 remain Don-owned and pending.
 
@@ -250,7 +249,79 @@ scanning or reclaiming that unrecognized orphan. It may require deliberate
 external cleanup after inspection; no false rollback/cleanup claim is made.
 A command can be published while skill publication fails; no access was authorized.
 
-These are module-level capabilities in this phase. The later setup coordinator
-will supply consent and wire activation/reload refresh through an injected-home
-Backend seam. Tests never invoke setup against the ordinary OS home. Acquired
+The typed Backend coordinator supplies explicit consent and actual activation/
+reload refresh through an injected-home seam. Production UI/picker integration
+is separate. Tests never invoke setup against the ordinary OS home. Acquired
 native output execution/update and real harness skill discovery remain M1/M3/M4.
+
+
+## App-led managed setup protocol
+
+`external-gateway.setup.preview` accepts `intent` (connect, repair, rotate,
+disconnect, install-skill) and optional opaque `selectionId`. It never accepts a
+path, bearer, bytes or overwrite flag, and performs no writes. It returns the
+exact command/optional skill destination, installed/proposed command owner,
+version and digest, update disposition, skill write effect and whether credentials
+change. Explicit repair never hides an ownership transfer, downgrade or same-
+version byte change. Four
+plans expire after ten minutes. `setup.apply` accepts only `planId`, rechecks
+policy revision, running saved port, path identities and complete output digests,
+then returns an operation ID. Repeated accepted apply discovers that operation;
+`setup.status` and `setup.watch` report secret-free command/skill/access results.
+Observer cancellation, remount and acceptance-response loss do not duplicate
+accepted work. No setup intent enables a listener or expands tool selections.
+Connect/rotate require a running committed listener. Install-skill does not
+require credentials. Phase 5 supplies the production folder picker and UI.
+
+One unfinished operation is owned per Instance. Its private format-1 client
+journal is under the private client state's `setup` namespace, not server policy.
+It contains pending credentials and must not be inspected in ordinary logs or
+support evidence. Publication orders private journal, recognized required
+outputs, Policy verifier/operation commit, then one atomic credential+endpoint
+record. A bounded secret-free last receipt remains; completed receipts do not
+retain selected folder paths. No prior-folder registry or scan exists.
+
+A failure can leave a command/skill installed without access. A committed
+verifier may briefly have no published credential. Recovery reconciles exact
+operation/verifier and recognized output bytes, never arbitrary temp contents.
+Never-committed proposals require explicit repair. A current committed operation
+may finish publication; revoked, rotated, disconnected or disable-all-superseded
+material cannot recreate authority. Uncertain Policy persistence remains closed.
+A revoked managed token requires explicit connect consent, not silent repair.
+Port-only repair preserves an intact bearer and generation. A missing credential
+requires explicit rotation instead. A different local origin for the same
+Workspace refuses; there is no automatic handover. If the old origin is
+unavailable, deliberate deletion of its exact local record is an external Person
+choice, not revocation of its server token.
+
+Managed authority uses one of the existing 32 token slots. Rotation replaces the
+same slot with its next generation, closes old idle streams and never overlaps credentials.
+Manual revoke is available; raw one-time regeneration of a managed ID returns
+`external_gateway.managed_setup_required`. Disconnect durably revokes before
+local removal. Uncertain revoke is not success; cleanup-pending retries remove
+only the matching record and never mint credentials. Shared command/skills are
+not deleted. Revoke before Package removal. Calls admitted earlier may finish.
+
+Policy reads version 1, migrating durably to configVersion 2 only on managed
+commit. Manual verifiers/generations, grants, desired state and port survive.
+Managed markers/tombstones contain no bearer. Invalid/future state is untouched;
+older Backends cannot read v2 and are not a rollback procedure. CLI/store format
+1 and Package version are independent. The store mutation lock precedes bounded
+Policy mutation; manual revocation never waits on local cleanup. No socket,
+dialog or observation wait holds both owners. Lifecycle closes new setup
+admission before stopping Policy and joining/checkpointing accepted disk work.
+
+### Backend fixture for real-Host qualification
+
+Build `cargo build --locked -p teamarness-generated-package-backend --example
+backend-fixture` from the recorded clean revision. Its entry lives in
+`backend/tests/support/backend_fixture.rs`, links the same router/Backend modules
+and is never assembled into production `dist`. It requires
+`TEAMARNESS_FIXTURE_HOME` to be an absolute canonical private physical root and
+refuses missing/unsafe roots before Host stdio. There is no production override.
+Provision it **before** starting either Backend or CLI fixture. Stage/hash/admit
+these fixture bytes separately as a fixture Package Directory; Host Initialization
+still supplies the actual admitted source digest. Never patch production dist or
+substitute fixture hashes for the production artifact. These are injected-home
+qualification results, not production OS-home/native installation evidence.
+Installed checks require the disposable OS account/home and M1–M5 observations.

@@ -45,7 +45,7 @@ impl<'a> SkillInstaller<'a> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SkillPlan {
     selected: Pin,
     destination: Pin,
@@ -57,6 +57,26 @@ pub struct SkillPlan {
     pending: Option<Vec<u8>>,
 }
 impl SkillPlan {
+    pub(crate) fn recheck(&self, installer: &ManagedInstaller, admission: Admitted) -> Result<()> {
+        if SkillInstaller::new(installer).preview(&self.selected.path, admission)? != *self {
+            return Err(InstallError::StalePreview);
+        }
+        Ok(())
+    }
+    pub(crate) fn after_preparation(
+        &self,
+        installer: &ManagedInstaller,
+        admission: Admitted,
+    ) -> Result<Self> {
+        self.selected.check()?;
+        self.destination.check()?;
+        self.state.existing_check()?;
+        let new = SkillInstaller::new(installer).preview(&self.selected.path, admission)?;
+        if self.old != new.old || self.pending != new.pending || self.content != new.content {
+            return Err(InstallError::StalePreview);
+        }
+        Ok(new)
+    }
     pub fn destination(&self) -> &Path {
         &self.destination.path
     }

@@ -1,5 +1,17 @@
 // Generated from ui-contract.json by teamarness-contract-types. Do not edit.
 
+export type CommandChange = {
+  readonly "disposition": "install" | "unchanged" | "refresh" | "explicit-repair";
+  readonly "installed": CommandVersion | null;
+  readonly "proposed": CommandVersion;
+};
+
+export type CommandVersion = {
+  readonly "installation": string;
+  readonly "sha256": string;
+  readonly "version": string;
+};
+
 export type Contract = {
   readonly "available": boolean;
   readonly "contract": string;
@@ -14,6 +26,18 @@ export type Contract = {
 export type ObservedContract = {
   readonly "contract": string;
   readonly "major": number;
+};
+
+export type SetupStatus = {
+  readonly "access": "unchanged" | "pending" | "configured" | "revoked" | "repair-required";
+  readonly "command": "unchanged" | "pending" | "installed";
+  readonly "commandPath": string | null;
+  readonly "error": string | null;
+  readonly "intent": ("connect" | "repair" | "rotate" | "disconnect" | "install-skill") | null;
+  readonly "operationId": string | null;
+  readonly "phase": "idle" | "accepted" | "prepared" | "outputs" | "committed" | "complete" | "repair-required" | "conflict" | "cleanup-pending";
+  readonly "skill": "not-requested" | "pending" | "installed";
+  readonly "skillPath": string | null;
 };
 
 export type Status = {
@@ -31,6 +55,7 @@ export type Token = {
   readonly "generation": number;
   readonly "id": string;
   readonly "label": string;
+  readonly "managed"?: boolean;
 };
 
 export type Tool = {
@@ -79,6 +104,24 @@ export type PackageContract = {
         readonly "ok": boolean;
         readonly "warning": string | null;
       } };
+    readonly "external-gateway.setup.apply": { readonly request: {
+        readonly "planId": string;
+      }; readonly response: {
+        readonly "operationId": string;
+      } };
+    readonly "external-gateway.setup.preview": { readonly request: {
+        readonly "intent": "connect" | "repair" | "rotate" | "disconnect" | "install-skill";
+        readonly "selectionId"?: string;
+      }; readonly response: {
+        readonly "commandChange": CommandChange | null;
+        readonly "commandPath": string;
+        readonly "credentialChange": boolean;
+        readonly "intent": "connect" | "repair" | "rotate" | "disconnect" | "install-skill";
+        readonly "planId": string;
+        readonly "skillChange": "not-requested" | "publish" | "unchanged";
+        readonly "skillPath": string | null;
+      } };
+    readonly "external-gateway.setup.status": { readonly request: Record<string, never>; readonly response: SetupStatus };
     readonly "external-gateway.status.get": { readonly request: Record<string, never>; readonly response: Status };
     readonly "external-gateway.token.create": { readonly request: {
         readonly "label": string;
@@ -111,6 +154,7 @@ export type PackageContract = {
       } };
   };
   readonly subscriptions: {
+    readonly "external-gateway.setup.watch": { readonly request: Record<string, never>; readonly event: SetupStatus };
     readonly "external-gateway.status.watch": { readonly request: Record<string, never>; readonly event: Status };
   };
 };

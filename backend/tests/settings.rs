@@ -1,9 +1,9 @@
 //! Verifies: TEAM.SYS.PKG-R05, R13, R19. Unavailable selections through the typed UI seam.
+use http_support::backend_environment;
 mod http_support;
 use http_support::*;
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
-use teamarness_generated_package_backend::router;
 use teamarness_package_sdk::testing::{Harness, HarnessBuilder, ScriptedCapability};
 
 async fn setup(
@@ -30,7 +30,7 @@ async fn setup(
         }
         Ok(value)
     });
-    let mut h = HarnessBuilder::new(router().into_backend())
+    let mut h = HarnessBuilder::new(backend_environment::router().into_backend())
         .data_directory(dir.canonicalize().unwrap())
         .installation(&"b".repeat(64), "Local")
         .capability("teamarness.membership", membership_support::present())

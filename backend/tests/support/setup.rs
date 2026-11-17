@@ -1,0 +1,123 @@
+#![allow(dead_code)]
+use crate::membership_support;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use std::{path::PathBuf, sync::Arc};
+use teamarness_generated_package_backend::{
+    State, managed_install::Admitted, setup::BackendEnvironment,
+};
+use teamarness_package_sdk::testing::{Harness, HarnessBuilder, ScriptedCapability};
+use teamarness_package_sdk::{Context, Empty};
+pub struct Fixture {
+    pub data: tempfile::TempDir,
+    pub home: tempfile::TempDir,
+    pub source: PathBuf,
+}
+impl Fixture {
+    pub fn new() -> Self {
+        let data = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let source = data.path().canonicalize().unwrap().join("source");
+        std::fs::write(&source, b"admitted setup fixture v1").unwrap();
+        Self { data, home, source }
+    }
+    pub fn environment(&self) -> BackendEnvironment {
+        self.environment_version("1.0.0")
+    }
+    pub fn environment_version(&self, version: &str) -> BackendEnvironment {
+        let digest = Sha256::digest(std::fs::read(&self.source).unwrap())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        BackendEnvironment::injected(self.home.path().canonicalize().unwrap()).with_admitted_source(
+            self.source.clone(),
+            Admitted::new(&"b".repeat(64), version, &digest).unwrap(),
+        )
+    }
+    pub async fn start(&self) -> (Harness, Arc<State>) {
+        self.start_with(self.environment()).await
+    }
+    pub async fn start_with(&self, e: BackendEnvironment) -> (Harness, Arc<State>) {
+        self.start_as(e, &"b".repeat(64)).await
+    }
+    pub async fn start_as(
+        &self,
+        e: BackendEnvironment,
+        installation: &str,
+    ) -> (Harness, Arc<State>) {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let r = teamarness_generated_package_backend::router_with_environment(e).request(
+            "test.capture",
+            move |c: Context<State>, _: Empty| {
+                let tx = tx.clone();
+                async move {
+                    tx.send(c.state().clone()).await.unwrap();
+                    Ok(json!({}))
+                }
+            },
+        );
+        let mut h = HarnessBuilder::new(r.into_backend())
+            .package_identity("dev.teamarness.external-gateway")
+            .package_version(teamarness_generated_package_backend::PACKAGE_VERSION)
+            .process_minor(1)
+            .data_directory(self.data.path().canonicalize().unwrap())
+            .installation(installation, "Local")
+            .capability("teamarness.membership", membership_support::present())
+            .capability_version("teamarness.package-ports", ScriptedCapability::new(), 3, 0)
+            .start()
+            .await;
+        h.activate().await.unwrap();
+        h.request("test.capture", json!({})).await.unwrap();
+        let s = rx.recv().await.unwrap();
+        (h, s)
+    }
+    pub fn connections(
+        &self,
+    ) -> Vec<teamarness_generated_package_backend::client_store::Connection> {
+        teamarness_generated_package_backend::client_store::ClientStore::for_home(
+            &self.home.path().canonicalize().unwrap(),
+        )
+        .unwrap()
+        .connections()
+        .unwrap()
+    }
+}
+pub async fn finish(h: &mut Harness) -> Value {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let v = h
+                .request("external-gateway.setup.status", json!({}))
+                .await
+                .unwrap();
+            if !["accepted", "prepared", "outputs", "committed"]
+                .contains(&v["phase"].as_str().unwrap())
+            {
+                return v;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .unwrap()
+}
+pub async fn apply(h: &mut Harness, intent: &str) -> Value {
+    let p = h
+        .request("external-gateway.setup.preview", json!({"intent":intent}))
+        .await
+        .unwrap();
+    h.request(
+        "external-gateway.setup.apply",
+        json!({"planId":p["planId"]}),
+    )
+    .await
+    .unwrap();
+    finish(h).await
+}
+pub async fn connect(h: &mut Harness) -> Value {
+    h.request("external-gateway.listener.set", json!({"enabled":true}))
+        .await
+        .unwrap();
+    let s = apply(h, "connect").await;
+    assert_eq!(s["phase"], "complete", "{s}");
+    s
+}

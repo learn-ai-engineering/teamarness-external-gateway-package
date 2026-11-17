@@ -17,6 +17,9 @@
         "generation": {
           "type": "integer",
           "minimum": 1
+        },
+        "managed": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -221,6 +224,180 @@
         "reviewRequired",
         "kind",
         "delivery"
+      ],
+      "additionalProperties": false
+    },
+    "SetupStatus": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "intent": {
+          "anyOf": [
+            {
+              "enum": [
+                "connect",
+                "repair",
+                "rotate",
+                "disconnect",
+                "install-skill"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phase": {
+          "enum": [
+            "idle",
+            "accepted",
+            "prepared",
+            "outputs",
+            "committed",
+            "complete",
+            "repair-required",
+            "conflict",
+            "cleanup-pending"
+          ]
+        },
+        "command": {
+          "enum": [
+            "unchanged",
+            "pending",
+            "installed"
+          ]
+        },
+        "skill": {
+          "enum": [
+            "not-requested",
+            "pending",
+            "installed"
+          ]
+        },
+        "access": {
+          "enum": [
+            "unchanged",
+            "pending",
+            "configured",
+            "revoked",
+            "repair-required"
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "commandPath": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "skillPath": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "operationId",
+        "intent",
+        "phase",
+        "command",
+        "skill",
+        "access",
+        "error",
+        "commandPath",
+        "skillPath"
+      ],
+      "additionalProperties": false
+    },
+    "CommandVersion": {
+      "type": "object",
+      "properties": {
+        "installation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "installation",
+        "version",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "CommandChange": {
+      "type": "object",
+      "properties": {
+        "disposition": {
+          "enum": [
+            "install",
+            "unchanged",
+            "refresh",
+            "explicit-repair"
+          ]
+        },
+        "installed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommandVersion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proposed": {
+          "$ref": "#/$defs/CommandVersion"
+        }
+      },
+      "required": [
+        "disposition",
+        "installed",
+        "proposed"
       ],
       "additionalProperties": false
     }
@@ -664,6 +841,138 @@
         ],
         "additionalProperties": false
       }
+    },
+    "external-gateway.setup.preview": {
+      "request": {
+        "type": "object",
+        "properties": {
+          "intent": {
+            "enum": [
+              "connect",
+              "repair",
+              "rotate",
+              "disconnect",
+              "install-skill"
+            ]
+          },
+          "selectionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "intent"
+        ],
+        "additionalProperties": false
+      },
+      "response": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "intent": {
+            "enum": [
+              "connect",
+              "repair",
+              "rotate",
+              "disconnect",
+              "install-skill"
+            ]
+          },
+          "commandPath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "skillPath": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credentialChange": {
+            "type": "boolean"
+          },
+          "commandChange": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CommandChange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "skillChange": {
+            "enum": [
+              "not-requested",
+              "publish",
+              "unchanged"
+            ]
+          }
+        },
+        "required": [
+          "planId",
+          "intent",
+          "commandPath",
+          "skillPath",
+          "credentialChange",
+          "commandChange",
+          "skillChange"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "external-gateway.setup.apply": {
+      "request": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "planId"
+        ],
+        "additionalProperties": false
+      },
+      "response": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "operationId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "external-gateway.setup.status": {
+      "request": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "response": {
+        "$ref": "#/$defs/SetupStatus"
+      }
     }
   },
   "subscriptions": {
@@ -676,6 +985,17 @@
       },
       "event": {
         "$ref": "#/$defs/Status"
+      }
+    },
+    "external-gateway.setup.watch": {
+      "request": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "event": {
+        "$ref": "#/$defs/SetupStatus"
       }
     }
   }

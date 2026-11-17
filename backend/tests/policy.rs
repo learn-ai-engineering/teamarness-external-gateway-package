@@ -1,11 +1,13 @@
 //! Verifies: TEAM.SYS.PKG-R03, R05, R13, R14, R19. Only the Host capability is scripted.
+#[path = "support/environment.rs"]
+mod backend_environment;
 mod membership_support;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
-use teamarness_generated_package_backend::{State, router};
+use teamarness_generated_package_backend::State;
 use teamarness_package_sdk::testing::{Harness, HarnessBuilder, ScriptedCapability};
 use teamarness_package_sdk::{BackendError, Context};
 
@@ -89,7 +91,7 @@ struct Read {
     port: String,
 }
 async fn start(provider: Arc<Mutex<Provider>>, directory: &std::path::Path) -> Harness {
-    start_router(provider, directory, router()).await
+    start_router(provider, directory, backend_environment::router()).await
 }
 async fn start_router(
     provider: Arc<Mutex<Provider>>,
@@ -318,7 +320,6 @@ async fn property_named_description_is_schema_not_an_annotation() {
 async fn failed_enable_never_publishes_tool_policy_even_when_host_selection_committed() {
     use teamarness_generated_package_backend::{
         config::{StorageFault, WriteStage},
-        router_with_storage_fault,
         tokens::OsEntropy,
     };
     struct Once(Mutex<Option<WriteStage>>);
@@ -345,7 +346,10 @@ async fn failed_enable_never_publishes_tool_policy_even_when_host_selection_comm
         let mut h = start_router(
             p.clone(),
             dir.path(),
-            router_with_storage_fault(Arc::new(OsEntropy), Some(fault.clone())),
+            backend_environment::router_with_storage_fault(
+                Arc::new(OsEntropy),
+                Some(fault.clone()),
+            ),
         )
         .await;
         let a = token(&mut h, "a").await;

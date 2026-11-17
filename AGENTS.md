@@ -223,7 +223,7 @@ Do not claim synchronization, team sharing, sandboxing, another target platform,
 
 `backend/src/policy.rs` is the only authorization owner. UI and eventual HTTP callers must use it, never maintain an independent grant cache. `catalog.rs` uses major-3 Person discovery and route preconditions. Queries are never retried. Metadata pages are consumed incrementally; complete documents are bounded and released rather than collected into an all-Provider catalog.
 
-`config.rs` owns version-1 state under the supplied Data Directory. Descriptor-relative no-follow opens and ownership checks use exact rustix 1.1.4 with default features off and std/fs/process features. This G-only dependency was explicitly approved to meet the accepted storage contract; the version and checksum came from the qualified Host lockfile. No SDK source is patched. Keep the rustix license files in the dependency registry/distribution and preserve all vendored notices.
+`config.rs` reads version-1 and owns managed version-2 state under the supplied Data Directory. Descriptor-relative no-follow opens and ownership checks use exact rustix 1.1.4 with default features off and std/fs/process features. This G-only dependency was explicitly approved to meet the accepted storage contract; the version and checksum came from the qualified Host lockfile. No SDK source is patched. Keep the rustix license files in the dependency registry/distribution and preserve all vendored notices.
 
 `tokens.rs` uses OS entropy, domain-separated SHA-256 and fixed-size constant-time verifier comparison. Never log bearer values or persist them in server Policy/configuration. The separate `client_store.rs` intentionally persists private client bearer material under the effective OS user’s home; keep that custody distinct from verifier-only server state. Token labels are not principals. All tokens share exact tool policy. All four metadata-derived shapes, including Conversations, require exact explicit selection. Package enable alone selects none; upgrade alone grants no commands or streams. Commands act as the Person, never replay automatically, and preserve authoritative uncertainty plus complete Provider-owned details within 4,096 bytes/depth 8. Gateway failures after possible command dispatch are uncertain and nonretryable. A schema field named description remains schema data; only schema annotation keywords are removed from fingerprints.
 
@@ -241,7 +241,7 @@ Corrected full-access Phase 2 refreshes the four canonical vendor trees once fro
 
 `streams.rs` owns eight pending/active subscriptions separately from twelve calls. Confirmed SDK methods precede HTTP 200/ready. Legacy/unconfirmed setup refuses clearly, never fabricates ready. Policy owns token-generation/exact-tool registration and every output admission. Idle permission/lifecycle loss signals streams before drain; failed storage closes all. Pending observer loss retains capacity through SDK terminal and late success closes. Use recv_with_credit with one waiting frame plus one writer-owned frame, 256 KiB original values plus 4 KiB framing, five-second pending-write flush and 15-second heartbeat. No owner is held over socket/credit/cleanup waits; no detached handles, durable replay, automatic reconnect or model wakeup. Already-admitted bounded bytes may drain. Provider Markdown stays unchanged; structured runtime.guide remains callable. Native Epic/Collection prerequisites and Provider versions/conflicts stay Provider-owned. Final real-Host qualification and Don-owned corrected-plan M1–M4 remain pending.
 
-`cli/` owns interaction major 1, raw-byte JSON/NDJSON and numeric-loopback Hyper client access. `cli/stream.rs` serializes one observation, validated ready and terminal selection; descriptor-level nonblocking stdout has one bounded pending line, a five-second write budget and no detached writer. Subscriptions require readiness-registered pipe/terminal stdout; regular/non-pollable output refuses before network (exit 2, stderr JSON/hint), never silently falling back to blocking disk I/O. Continuous mode has no CLI lifetime cap; the 45-second valid-frame liveness clock pauses under local output backpressure. `client_store.rs` owns private format-1 connection files, origin conflicts and cross-process publication. Production home lookup uses bounded fixed macOS dscacheutil, never HOME or a public path flag; tests inject physical homes through constructors or the unassembled fixture example. CLI help/version do not resolve home, start Host stdio, listener or AppKit. Managed access coordination remains a later phase. `backend/build.rs` embeds the Package manifest version; Cargo crate version, CLI major and store format are independent.
+`cli/` owns interaction major 1, raw-byte JSON/NDJSON and numeric-loopback Hyper client access. `cli/stream.rs` serializes one observation, validated ready and terminal selection; descriptor-level nonblocking stdout has one bounded pending line, a five-second write budget and no detached writer. Subscriptions require readiness-registered pipe/terminal stdout; regular/non-pollable output refuses before network (exit 2, stderr JSON/hint), never silently falling back to blocking disk I/O. Continuous mode has no CLI lifetime cap; the 45-second valid-frame liveness clock pauses under local output backpressure. `client_store.rs` owns private format-1 connection files, origin conflicts and cross-process publication. Production home lookup uses bounded fixed macOS dscacheutil, never HOME or a public path flag; tests inject physical homes through constructors or the unassembled fixture example. CLI help/version do not resolve home, start Host stdio, listener or AppKit. `setup.rs` owns recoverable managed access coordination; Policy alone owns authorization. `backend/build.rs` embeds the Package manifest version; Cargo crate version, CLI major and store format are independent.
 
 
 `managed_install.rs` owns recognized executable/skill publication safety shared by
@@ -257,6 +257,27 @@ reconcile partial receipts; never promote temporary bytes or claim rollback.
 literal absolute quoted command, no bearer/default/store path/Provider schema.
 Selected folder identities are revalidated; no registry or previous-folder scan.
 A pre-journal death can leave a private random staging orphan; retry never adopts
-or reclaims it. Phase 4 must add the injected Backend-home seam and wire actual
-activation/reload refresh and coordinator consent; Phase 3 only tests these
-module interfaces. No automated test may resolve/install into the ordinary home.
+or reclaims it. `setup.rs` wires actual owning-Installation activation/reload refresh and explicit
+coordinator consent. All automated Backend constructors must inject private
+physical homes, including regression harnesses. No automated test may resolve,
+read or install into the ordinary home. The unassembled `backend-fixture` entry
+requires its physical private root; production accepts no override.
+
+`setup.rs` retains four ten-minute read-only previews and one owned unfinished
+operation. Its private client journal precedes recognized outputs, the narrow
+Policy verifier/association commit and atomic credential+endpoint publication.
+Never commit after a required output fails. Exact current committed recovery may
+finish publication; never-committed proposals need explicit repair. Managed
+revoked/disconnected tombstones prevent resurrection. Rotation replaces the same
+slot/generation and raw manual regenerate refuses managed IDs. Disconnect revokes
+before only matching local cleanup; uncertain revoke is not success. Port-only
+repair preserves intact credentials. No second authorization owner, automatic
+handover or grants/listener enablement is added. Lock order is ClientStore before
+bounded Policy, never inverse; no socket/dialog/observer waits hold owners.
+Lifecycle closes admission before Policy suspension and joins owned disk work.
+Selected paths persist only in unfinished work; completed receipts are secret-free
+and do not retain selection paths. Config v1 migrates only at managed authority
+commit to v2, preserving manual authority/port/grants/desired. Invalid/future
+state and unsupported downgrade remain untouched. CLI/store major 1, capabilities,
+artifact shape and Package version are independent and unchanged by Phase 4.
+Production picker/UI remains Phase 5; M1–M5 and real-Host qualification remain pending.

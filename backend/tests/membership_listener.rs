@@ -1,4 +1,5 @@
 //! Verifies: TEAM.SYS.PKG-R02, R05, R09, R13. Membership signals stop idle sockets.
+use http_support::backend_environment;
 mod http_support;
 use http_support::*;
 use serde_json::{Value, json};
@@ -6,7 +7,6 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use teamarness_generated_package_backend::router;
 use teamarness_package_sdk::testing::{HarnessBuilder, ScriptedCapability};
 use tokio::{io::AsyncReadExt, net::TcpStream};
 
@@ -30,7 +30,7 @@ async fn membership_loss_stops_idle_listener_and_old_connections_without_request
     let provider = p.clone();
     let mut h = tokio::time::timeout(
         Duration::from_secs(3),
-        HarnessBuilder::new(router().into_backend())
+        HarnessBuilder::new(backend_environment::router().into_backend())
             .data_directory(dir.path().canonicalize().unwrap())
             .installation(&"b".repeat(64), "Local")
             .capability("teamarness.membership", membership)
@@ -136,18 +136,21 @@ impl Fixture {
     ) -> (Harness, Arc<Policy>) {
         let (send, recv) = tokio::sync::oneshot::channel();
         let send = Arc::new(Mutex::new(Some(send)));
-        let r = router().request("test.capture", move |ctx: Context<State>, _: Empty| {
-            let send = send.clone();
-            async move {
-                let _ = send
-                    .lock()
-                    .unwrap()
-                    .take()
-                    .unwrap()
-                    .send(ctx.state().policy.clone());
-                Ok(json!({}))
-            }
-        });
+        let r = backend_environment::router().request(
+            "test.capture",
+            move |ctx: Context<State>, _: Empty| {
+                let send = send.clone();
+                async move {
+                    let _ = send
+                        .lock()
+                        .unwrap()
+                        .take()
+                        .unwrap()
+                        .send(ctx.state().policy.clone());
+                    Ok(json!({}))
+                }
+            },
+        );
         let provider = self.provider.clone();
         let mut h = HarnessBuilder::new(r.into_backend())
             .data_directory(dir.canonicalize().unwrap())
@@ -466,18 +469,21 @@ async fn membership_loss_retires_pending_http_observer_without_replaying_owned_s
     let provider = f.provider.clone();
     let (send, recv) = tokio::sync::oneshot::channel();
     let send = Arc::new(Mutex::new(Some(send)));
-    let r = router().request("test.capture", move |ctx: Context<State>, _: Empty| {
-        let send = send.clone();
-        async move {
-            send.lock()
-                .unwrap()
-                .take()
-                .unwrap()
-                .send(ctx.state().policy.clone())
-                .ok();
-            Ok(json!({}))
-        }
-    });
+    let r = backend_environment::router().request(
+        "test.capture",
+        move |ctx: Context<State>, _: Empty| {
+            let send = send.clone();
+            async move {
+                send.lock()
+                    .unwrap()
+                    .take()
+                    .unwrap()
+                    .send(ctx.state().policy.clone())
+                    .ok();
+                Ok(json!({}))
+            }
+        },
+    );
     let mut h = HarnessBuilder::new(r.into_backend())
         .data_directory(dir.path().canonicalize().unwrap())
         .installation(&"b".repeat(64), "Local")
@@ -564,7 +570,6 @@ async fn membership_invalidation_fences_listener_enable_pending_durable_publicat
     use std::sync::atomic::{AtomicBool, Ordering};
     use teamarness_generated_package_backend::{
         config::{StorageFault, WriteStage},
-        router_with_storage_fault,
         tokens::OsEntropy,
     };
     struct Fault {
@@ -589,21 +594,20 @@ async fn membership_invalidation_fences_listener_enable_pending_durable_publicat
     });
     let (send, recv) = tokio::sync::oneshot::channel();
     let send = Arc::new(Mutex::new(Some(send)));
-    let r = router_with_storage_fault(Arc::new(OsEntropy), Some(fault.clone())).request(
-        "test.capture",
-        move |ctx: Context<State>, _: Empty| {
-            let send = send.clone();
-            async move {
-                send.lock()
-                    .unwrap()
-                    .take()
-                    .unwrap()
-                    .send(ctx.state().policy.clone())
-                    .ok();
-                Ok(json!({}))
-            }
-        },
-    );
+    let r =
+        backend_environment::router_with_storage_fault(Arc::new(OsEntropy), Some(fault.clone()))
+            .request("test.capture", move |ctx: Context<State>, _: Empty| {
+                let send = send.clone();
+                async move {
+                    send.lock()
+                        .unwrap()
+                        .take()
+                        .unwrap()
+                        .send(ctx.state().policy.clone())
+                        .ok();
+                    Ok(json!({}))
+                }
+            });
     let mut h = HarnessBuilder::new(r.into_backend())
         .data_directory(dir.path().canonicalize().unwrap())
         .installation(&"b".repeat(64), "Local")
@@ -649,7 +653,7 @@ async fn one_workspace_membership_loss_does_not_stop_another_workspace_listener(
     let (port, _) = enable(&mut h).await;
     let mut roster = snapshot(true, 1);
     roster["workspaceId"] = "workspace2".into();
-    let mut other = HarnessBuilder::new(router().into_backend())
+    let mut other = HarnessBuilder::new(backend_environment::router().into_backend())
         .data_directory(b.path().canonicalize().unwrap())
         .workspace("workspace2", "Other Workspace")
         .installation(&"b".repeat(64), "Local")
@@ -678,7 +682,7 @@ async fn one_workspace_membership_loss_does_not_stop_another_workspace_listener(
 async fn missing_or_wrong_major_membership_grant_cannot_activate() {
     for major in [None, Some(2)] {
         let dir = tempfile::tempdir().unwrap();
-        let mut builder = HarnessBuilder::new(router().into_backend())
+        let mut builder = HarnessBuilder::new(backend_environment::router().into_backend())
             .data_directory(dir.path().canonicalize().unwrap())
             .installation(&"b".repeat(64), "Local")
             .capability_version("teamarness.package-ports", ScriptedCapability::new(), 3, 0);

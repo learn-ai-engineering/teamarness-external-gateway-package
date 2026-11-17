@@ -1,7 +1,7 @@
 //! Verifies: TEAM.SYS.PKG-R03, R13, R19. Bounded discovery through typed UI and SDK v3.
+use http_support::backend_environment;
 use http_support::membership_support;
 use serde_json::{Value, json};
-use teamarness_generated_package_backend::router;
 use teamarness_package_sdk::{
     BackendError,
     testing::{HarnessBuilder, ScriptedCapability},
@@ -22,7 +22,7 @@ async fn one_ui_request_reads_one_bounded_host_page_and_never_enables_it() {
         }
     });
     let dir = tempfile::tempdir().unwrap();
-    let mut h = HarnessBuilder::new(router().into_backend())
+    let mut h = HarnessBuilder::new(backend_environment::router().into_backend())
         .data_directory(dir.path().canonicalize().unwrap())
         .installation(&"b".repeat(64), "Local")
         .capability("teamarness.membership", membership_support::present())
@@ -58,7 +58,7 @@ async fn catalog_churn_restarts_once_then_refuses_without_dispatch() {
         Err(BackendError::new("port_catalog_changed", false, json!({})))
     });
     let dir = tempfile::tempdir().unwrap();
-    let mut h = HarnessBuilder::new(router().into_backend())
+    let mut h = HarnessBuilder::new(backend_environment::router().into_backend())
         .data_directory(dir.path().canonicalize().unwrap())
         .installation(&"b".repeat(64), "Local")
         .capability("teamarness.membership", membership_support::present())
@@ -130,7 +130,7 @@ async fn oversized_summary_page_is_refused_not_truncated() {
     let script = ScriptedCapability::new()
         .calls(|_, _| Ok(json!({"contracts":(0..33).map(row).collect::<Vec<_>>()})));
     let dir = tempfile::tempdir().unwrap();
-    let mut h = HarnessBuilder::new(router().into_backend())
+    let mut h = HarnessBuilder::new(backend_environment::router().into_backend())
         .data_directory(dir.path().canonicalize().unwrap())
         .installation(&"b".repeat(64), "Local")
         .capability("teamarness.membership", membership_support::present())

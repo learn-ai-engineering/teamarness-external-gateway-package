@@ -2,6 +2,7 @@
 //! Unlike ScriptedCapability, this seam can hold confirmation and address multiple streams.
 #![allow(dead_code)]
 use super::Provider;
+use crate::http_support::backend_environment;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
@@ -11,7 +12,7 @@ use std::{
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use teamarness_generated_package_backend::{State, policy::Policy, router};
+use teamarness_generated_package_backend::{State, policy::Policy};
 use teamarness_package_sdk::{Context, Empty, Package};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, DuplexStream},
@@ -146,12 +147,12 @@ impl Fixture {
         let (capture, captured) = oneshot::channel();
         let capture = Arc::new(Mutex::new(Some(capture)));
         let router = if let Some(fault) = fault {
-            teamarness_generated_package_backend::router_with_storage_fault(
+            backend_environment::router_with_storage_fault(
                 Arc::new(teamarness_generated_package_backend::tokens::OsEntropy),
                 Some(fault),
             )
         } else {
-            router()
+            backend_environment::router()
         };
         let router = router.request("test.capture", move |c: Context<State>, _: Empty| {
             let capture = capture.clone();

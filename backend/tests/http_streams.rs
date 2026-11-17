@@ -1,4 +1,5 @@
 //! Verifies: TEAM.SYS.PKG-R03, R13, R14. Real sockets and Policy; only SDK capability scripted.
+use http_support::backend_environment;
 mod http_support;
 use http_support::*;
 use serde_json::{Value, json};
@@ -6,7 +7,6 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use teamarness_generated_package_backend::router;
 use teamarness_package_sdk::testing::{Harness, HarnessBuilder, ScriptedCapability};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
@@ -17,7 +17,7 @@ async fn setup() -> (tempfile::TempDir, Harness, ScriptedCapability, u16, String
     let p = Arc::new(Mutex::new(Provider::new()));
     let script =
         ScriptedCapability::new().calls(move |m, payload| p.lock().unwrap().call(m, payload));
-    let mut h = HarnessBuilder::new(router().into_backend())
+    let mut h = HarnessBuilder::new(backend_environment::router().into_backend())
         .process_minor(1)
         .data_directory(dir.path().canonicalize().unwrap())
         .installation(&"b".repeat(64), "Local")
@@ -908,4 +908,91 @@ async fn stream_terminals_attribute_provider_host_sdk_and_gateway_without_invent
             h.shutdown().await.unwrap();
         }
     }
+}
+
+#[tokio::test]
+async fn managed_generation_replacement_and_revoke_close_idle_streams_without_overlap() {
+    use teamarness_generated_package_backend::{
+        config::{ManagedAssociation, ManagedDisposition},
+        tokens,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut f = duplex::Fixture::start(
+        dir.path(),
+        Arc::new(Mutex::new(Provider::new())),
+        false,
+        None,
+    )
+    .await;
+    f.select("items.changed", true).await;
+    let (port, manual) = f.enable().await;
+    let (first, bearer) = tokens::issue("Managed CLI", 1, None, &tokens::OsEntropy).unwrap();
+    let before = f.policy.setup_snapshot().await.unwrap();
+    let association = ManagedAssociation {
+        token_id: first.id.clone(),
+        generation: 1,
+        operation_id: "d".repeat(64),
+        origin_nonce: "e".repeat(64),
+        disposition: ManagedDisposition::Current,
+    };
+    f.policy
+        .commit_managed(
+            before.revision.clone(),
+            association.clone(),
+            Some(first.clone()),
+        )
+        .await
+        .unwrap();
+    f.policy
+        .commit_managed(
+            before.revision.clone(),
+            association.clone(),
+            Some(first.clone()),
+        )
+        .await
+        .unwrap();
+    let mut managed = open(port, &bearer, "items.changed", Value::Null).await;
+    let (id, _) = f.opens.recv().await.unwrap();
+    assert!(headers(&mut managed).await.starts_with("HTTP/1.1 200"));
+    assert_eq!(frame(&mut managed).await["type"], "ready");
+    let mut independent = open(port, &manual, "items.changed", Value::Null).await;
+    let (mid, _) = f.opens.recv().await.unwrap();
+    assert!(headers(&mut independent).await.starts_with("HTTP/1.1 200"));
+    assert_eq!(frame(&mut independent).await["type"], "ready");
+    let (next, credential) =
+        tokens::issue("Managed CLI", 2, Some(&first.id), &tokens::OsEntropy).unwrap();
+    let snapshot = f.policy.setup_snapshot().await.unwrap();
+    let replaced = ManagedAssociation {
+        generation: 2,
+        operation_id: "f".repeat(64),
+        ..association.clone()
+    };
+    f.policy
+        .commit_managed(snapshot.revision, replaced, Some(next))
+        .await
+        .unwrap();
+    assert!(f.policy.authenticate(&bearer).await.is_err());
+    f.policy.authenticate(&credential).await.unwrap();
+    f.peer.closed(&id).await;
+    assert!(f.peer.is_open(&mid));
+    let mut stream = open(port, &credential, "items.changed", Value::Null).await;
+    let (nid, _) = f.opens.recv().await.unwrap();
+    assert!(headers(&mut stream).await.starts_with("HTTP/1.1 200"));
+    assert_eq!(frame(&mut stream).await["type"], "ready");
+    f.policy
+        .change(teamarness_generated_package_backend::policy::Change::Revoke(first.id.clone()))
+        .await
+        .unwrap();
+    f.peer.closed(&nid).await;
+    assert!(f.peer.is_open(&mid));
+    assert!(
+        f.policy
+            .commit_managed(before.revision, association, Some(first))
+            .await
+            .is_err()
+    );
+    assert!(f.policy.authenticate(&bearer).await.is_err());
+    assert!(f.policy.authenticate(&credential).await.is_err());
+    f.policy.authenticate(&manual).await.unwrap();
+    f.dispose().await;
 }

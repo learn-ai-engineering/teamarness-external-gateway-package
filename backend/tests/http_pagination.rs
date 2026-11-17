@@ -1,9 +1,9 @@
-//! AC01/AC06/AC15: HTTP cursor envelopes over real sockets and the existing SDK seam.
+// AC01/AC06/AC15: HTTP cursor envelopes over real sockets and the existing SDK seam.
+use http_support::backend_environment;
 mod http_support;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use http_support::*;
 use serde_json::{Value, json};
-use teamarness_generated_package_backend::router;
 use teamarness_package_sdk::{
     BackendError,
     testing::{Harness, HarnessBuilder, ScriptedCapability},
@@ -41,7 +41,7 @@ async fn paged(directory: &std::path::Path, cursor: String) -> (Harness, Scripte
         }
         provider.lock().unwrap().call(method, payload)
     });
-    let mut h = HarnessBuilder::new(router().into_backend())
+    let mut h = HarnessBuilder::new(backend_environment::router().into_backend())
         .data_directory(directory.canonicalize().unwrap())
         .installation(&"b".repeat(64), "Local")
         .capability("teamarness.membership", membership_support::present())

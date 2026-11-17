@@ -41,7 +41,7 @@ All Rust/npm direct versions are exact. Cargo/npm lockfiles belong to this proje
 
 ## Security boundary
 
-Configuration uses private owned files, bounded serialized writes and durable replacement. The server stores only domain-separated SHA-256 token verifiers. Manual create/regenerate returns a one-time bearer; lost responses require regeneration. The separate machine-local ClientStore format 1 intentionally stores client bearer material in private owned files under the effective OS user’s home, outside the Package Data Directory. These are plaintext OS-user credentials, not encrypted or hostile-same-user protected. App-led publication arrives in a later phase. Do not store bearer values, private profiles or model credentials in this repository or evidence.
+Configuration uses private owned files, bounded serialized writes and durable replacement. The server stores only domain-separated SHA-256 token verifiers. Manual create/regenerate returns a one-time bearer; lost responses require regeneration. The separate machine-local ClientStore format 1 intentionally stores client bearer material in private owned files under the effective OS user’s home, outside the Package Data Directory. These are plaintext OS-user credentials, not encrypted or hostile-same-user protected. The typed Backend setup coordinator publishes credentials without bearer copying; production picker/UI integration follows separately. Do not store bearer values, private profiles or model credentials in this repository or evidence.
 
 Native Packages run as the current OS user. This is not a sandbox or protection against hostile same-user native code. Local commits and builds do not establish installation, publication or manual usability.
 
@@ -63,8 +63,38 @@ Monitoring failure is visibly unavailable, not confirmed removal. A usable strea
 
 ## Writes and live streams
 
-All active tokens gain every explicitly enabled operation. Writes act as the local Workspace Person; response loss can follow a committed write. Never replay a command automatically. Complete bounded Provider errors preserve versions/conflicts; follow the current guide to reconcile. Existing read fingerprints, tokens and configVersion 1 are unchanged; upgrade alone grants no command or stream.
+All active tokens gain every explicitly enabled operation. Writes act as the local Workspace Person; response loss can follow a committed write. Never replay a command automatically. Complete bounded Provider errors preserve versions/conflicts; follow the current guide to reconcile. Existing read fingerprints and manual tokens are preserved; version-1 policy migrates to version 2 only on the first managed authority commit. Upgrade alone grants no command or stream.
 
 One authenticated NDJSON connection owns each confirmed subscription. Ready means Provider and Host registration completed. Wait for ready before the initial read. Values remain arbitrary JSON; EOF without end means interruption. Reconnect explicitly and reconcile: there is no durable replay, automatic reconnect or model-wakeup promise. Eight pending/active stream slots are separate from twelve call slots. Output and credit are bounded, quiet streams heartbeat after 15 seconds, and pending output has five seconds to flush. Policy/lifecycle loss ends affected idle streams; already-admitted bounded bytes may drain.
 
 This phase is gateway-tested, not real-Host or outside-agent acceptance. Corrected-plan M1–M4 and independent Verify remain pending. Previous milestone M1–M5 is separate historical ownership.
+
+
+## Managed access coordination (Backend)
+
+Closed `setup.preview`, `setup.apply`, `setup.status` and `setup.watch` operations
+coordinate connect, repair, rotate, disconnect and selected skill installation.
+Preview is read-only, accepts only an opaque folder selection, expires in ten
+minutes and is limited to four plans. Apply rechecks consent and returns an
+owned operation ID; cancelling a UI observer does not cancel accepted work.
+Production folder selection and UI controls arrive in the next phase.
+
+Policy remains the only authorization owner. A private client operation journal
+precedes recognized outputs, verifier commit, and atomic credential/endpoint
+publication. Results distinguish actual partial effects. Uncommitted proposals
+need explicit repair; recovery may finish only a still-current committed
+operation. Revoke/disable-all/supersession cannot recreate old authority.
+Rotation replaces one managed generation in its existing token slot. Raw manual
+regeneration refuses managed IDs; manual tokens otherwise work unchanged.
+Disconnect revokes first, then removes only its matching local record; cleanup
+pending is not complete. Deleting a local file alone never revokes access.
+
+First managed authority commit durably migrates policy to configVersion 2,
+preserving port, desired state, grants and manual verifiers/generations. Older
+Backends cannot read it: downgrading or deleting policy is not rollback. Client
+store/CLI major 1 remain independent. Activation/reload refreshes only an intact,
+recognized compatible command owned by this Installation, strictly newer than
+the installed version; equal bytes/version is unchanged. Consent, ownership
+transfer, same-version changes and collisions retain explicit refusal rules.
+See [CLI custody and recovery](docs/cli.md). All automated Backend/CLI setup
+uses injected private physical homes; installed production-home M1–M5 are pending.

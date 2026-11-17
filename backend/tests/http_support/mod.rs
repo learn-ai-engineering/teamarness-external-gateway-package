@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 //! Verifies: TEAM.SYS.PKG-R03, R05, R13, R14, R19. Only the Host capability is scripted.
+#[path = "../support/environment.rs"]
+pub mod backend_environment;
 #[path = "../membership_support/mod.rs"]
 pub mod membership_support;
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -7,7 +9,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
-use teamarness_generated_package_backend::{State, router};
+use teamarness_generated_package_backend::State;
 use teamarness_package_sdk::BackendError;
 use teamarness_package_sdk::testing::{Harness, HarnessBuilder, ScriptedCapability};
 
@@ -114,7 +116,7 @@ use tokio::{
     net::TcpStream,
 };
 pub async fn start(provider: Arc<Mutex<Provider>>, directory: &std::path::Path) -> Harness {
-    start_router(provider, directory, router()).await
+    start_router(provider, directory, backend_environment::router()).await
 }
 pub async fn start_router(
     provider: Arc<Mutex<Provider>>,
@@ -257,7 +259,7 @@ pub async fn scripted(
 ) {
     let (send, recv) = tokio::sync::oneshot::channel();
     let send = Arc::new(Mutex::new(Some(send)));
-    let r = router().request(
+    let r = backend_environment::router().request(
         "test.capture",
         move |ctx: teamarness_package_sdk::Context<State>, _: teamarness_package_sdk::Empty| {
             let send = send.clone();

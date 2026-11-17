@@ -1,4 +1,5 @@
 //! Verifies: TEAM.SYS.PKG-R02, R05, R09. Real IPv4 sockets and SDK lifecycle.
+use http_support::backend_environment;
 mod http_support;
 use http_support::*;
 use serde_json::{Value, json};
@@ -79,7 +80,6 @@ async fn explicit_port_change_and_workspace_tokens_are_isolated() {
 async fn failed_port_commit_closes_provisional_socket_and_never_publishes_it() {
     use teamarness_generated_package_backend::{
         config::{StorageFault, WriteStage},
-        router_with_storage_fault,
         tokens::OsEntropy,
     };
     struct Fault(std::sync::atomic::AtomicBool);
@@ -97,7 +97,7 @@ async fn failed_port_commit_closes_provisional_socket_and_never_publishes_it() {
     let mut h = start_router(
         Arc::new(Mutex::new(Provider::new())),
         d.path(),
-        router_with_storage_fault(Arc::new(OsEntropy), Some(fault.clone())),
+        backend_environment::router_with_storage_fault(Arc::new(OsEntropy), Some(fault.clone())),
     )
     .await;
     let (old, _) = enable(&mut h).await;

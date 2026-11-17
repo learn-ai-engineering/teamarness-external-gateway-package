@@ -1,4 +1,5 @@
 //! Verifies: TEAM.SYS.PKG-R02, R13, R14. Exact public transport budgets.
+use http_support::backend_environment;
 mod http_support;
 use http_support::*;
 use serde_json::json;
@@ -256,7 +257,7 @@ async fn workspace_rate_bucket_is_charged_before_invalid_authentication() {
 #[tokio::test]
 async fn metadata_document_limit_is_exact_and_never_truncated() {
     use base64::{Engine, engine::general_purpose::STANDARD};
-    use teamarness_generated_package_backend::{catalog::digest, router};
+    use teamarness_generated_package_backend::catalog::digest;
     use teamarness_package_sdk::testing::{HarnessBuilder, ScriptedCapability};
     for size in [1048576, 1048577] {
         let p = Arc::new(Mutex::new(Provider::new()));
@@ -271,7 +272,7 @@ async fn metadata_document_limit_is_exact_and_never_truncated() {
             let mut out=p.lock().unwrap().call(method,payload)?;if method=="available"{out["contracts"][0]["metadataSha256"]=sha.clone().into();}Ok(out)
         });
         let d = tempfile::tempdir().unwrap();
-        let mut h = HarnessBuilder::new(router().into_backend())
+        let mut h = HarnessBuilder::new(backend_environment::router().into_backend())
             .data_directory(d.path().canonicalize().unwrap())
             .installation(&"b".repeat(64), "Local")
             .capability("teamarness.membership", membership_support::present())
@@ -297,7 +298,6 @@ async fn metadata_document_limit_is_exact_and_never_truncated() {
 }
 #[tokio::test]
 async fn summary_page_byte_budget_accepts_32768_and_refuses_32769() {
-    use teamarness_generated_package_backend::router;
     use teamarness_package_sdk::testing::{HarnessBuilder, ScriptedCapability};
     for size in [32768, 32769] {
         let mut provider = Provider::new();
@@ -319,7 +319,7 @@ async fn summary_page_byte_budget_accepts_32768_and_refuses_32769() {
             Ok(page.clone())
         });
         let d = tempfile::tempdir().unwrap();
-        let mut h = HarnessBuilder::new(router().into_backend())
+        let mut h = HarnessBuilder::new(backend_environment::router().into_backend())
             .data_directory(d.path().canonicalize().unwrap())
             .installation(&"b".repeat(64), "Local")
             .capability("teamarness.membership", membership_support::present())

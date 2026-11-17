@@ -37,3 +37,7 @@ semver.workspace = true
 [[example]]
 name = "cli-fixture"
 path = "tests/support/cli_fixture.rs"
+
+[[example]]
+name = "backend-fixture"
+path = "tests/support/backend_fixture.rs"

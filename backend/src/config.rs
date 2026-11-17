@@ -30,6 +30,8 @@ pub struct ContractSelection {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Config {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed: Option<ManagedAssociation>,
     pub config_version: u32,
     pub desired_enabled: bool,
     pub port: Option<u16>,
@@ -40,11 +42,51 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             config_version: 1,
+            managed: None,
             desired_enabled: false,
             port: None,
             tokens: vec![],
             contracts: BTreeMap::new(),
         }
+    }
+}
+/// Verifier-only continuity marker. Revoked/disconnected entries are tombstones, not repair authority.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ManagedAssociation {
+    pub token_id: String,
+    pub generation: u64,
+    pub operation_id: String,
+    pub origin_nonce: String,
+    pub disposition: ManagedDisposition,
+}
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ManagedDisposition {
+    Current,
+    Revoked,
+    Disconnected,
+}
+impl ManagedAssociation {
+    fn valid(&self, tokens: &[TokenRecord]) -> bool {
+        crate::tokens::valid_id(&self.token_id)
+            && self.generation > 0
+            && self.operation_id.len() == 64
+            && self
+                .operation_id
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            && self.origin_nonce.len() == 64
+            && self
+                .origin_nonce
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            && match self.disposition {
+                ManagedDisposition::Current => tokens
+                    .iter()
+                    .any(|t| t.id == self.token_id && t.generation == self.generation),
+                _ => !tokens.iter().any(|t| t.id == self.token_id),
+            }
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,7 +99,13 @@ pub enum StorageError {
 impl Config {
     pub fn validate(&self) -> Result<(), StorageError> {
         use teamarness_package_contract::identity::is_valid_package_identity as identity;
-        if self.config_version != 1
+        if !matches!(self.config_version, 1 | 2)
+            || (self.config_version == 1 && self.managed.is_some())
+            || (self.config_version == 2 && self.managed.is_none())
+            || self
+                .managed
+                .as_ref()
+                .is_some_and(|m| !m.valid(&self.tokens))
             || self.port == Some(0)
             || self.tokens.iter().any(|t| !t.valid())
         {
@@ -177,6 +225,53 @@ impl FileStore {
             fault: Arc::new(NoFault),
         })
     }
+    pub fn read_origin(&self) -> Result<Option<String>, StorageError> {
+        let file: File = match sys::openat(
+            &self.directory,
+            "origin",
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
+            Mode::empty(),
+        ) {
+            Ok(fd) => fd.into(),
+            Err(rustix::io::Errno::NOENT) => return Ok(None),
+            Err(_) => return Err(StorageError::Unsafe),
+        };
+        owned(&file, false)?;
+        let mut bytes = vec![];
+        io(file.take(65).read_to_end(&mut bytes))?;
+        let s = String::from_utf8(bytes).map_err(|_| StorageError::Invalid)?;
+        if s.len() != 64
+            || !s
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(StorageError::Invalid);
+        }
+        Ok(Some(s))
+    }
+    /// Stable profile-local origin. Created only by accepted setup, never preview/open.
+    pub fn setup_origin(
+        &self,
+        entropy: &dyn crate::tokens::Entropy,
+    ) -> Result<String, StorageError> {
+        if let Some(s) = self.read_origin()? {
+            return Ok(s);
+        }
+        let mut bytes = [0; 32];
+        entropy.fill(&mut bytes).map_err(|_| StorageError::Io)?;
+        let s = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let mut file: File = io(sys::openat(
+            &self.directory,
+            "origin",
+            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::RUSR | Mode::WUSR,
+        ))?
+        .into();
+        io(file.write_all(s.as_bytes()))?;
+        io(file.sync_all())?;
+        io(self.directory.sync_all())?;
+        Ok(s)
+    }
     pub fn with_fault(mut self, fault: Arc<dyn StorageFault>) -> Self {
         self.fault = fault;
         self
@@ -206,6 +301,14 @@ impl FileStore {
         }
         let value = teamarness_package_contract::json::strict_json(&bytes)
             .map_err(|_| StorageError::Invalid)?;
+        if value
+            .get("configVersion")
+            .and_then(serde_json::Value::as_u64)
+            == Some(1)
+            && value.get("managed").is_some()
+        {
+            return Err(StorageError::Invalid);
+        }
         let config: Config = serde_json::from_value(value).map_err(|_| StorageError::Invalid)?;
         config.validate()?;
         Ok(config)
@@ -215,7 +318,10 @@ impl FileStore {
     /// Errors never acknowledge authorization.
     pub fn write(&self, config: &Config) -> Result<(), StorageError> {
         config.validate()?;
-        self.read()?; // Refuse to overwrite unsafe or unrecognized existing state.
+        let committed = self.read()?; // Refuse unsafe/unrecognized state or an unsupported downgrade.
+        if committed.config_version > config.config_version {
+            return Err(StorageError::Invalid);
+        }
         self.discard_abandoned_temp()?;
         let bytes = io(serde_json::to_vec(config))?;
         let fd = io(sys::openat(
