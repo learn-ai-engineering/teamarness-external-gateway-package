@@ -1,16 +1,14 @@
 # Native CLI (interaction major 1)
 
 The single Apple Silicon macOS Backend artifact also provides native `tmx` mode.
-No Node, npm, source checkout or interpreter is needed at runtime. This phase
-provides ordinary operations, live subscriptions and tested managed command/skill
-publication modules. App-led setup, activation refresh wiring and native folder
-selection arrive later. No installed-access qualification is claimed.
+No Node, npm, source checkout or interpreter is needed at runtime. It provides ordinary operations, live subscriptions and recoverable managed
+command/skill setup with native folder selection and owning-Installation refresh.
+No installed-access qualification is claimed.
 
 From an assembled Package Directory, use its absolute Backend executable path
 with `--tmx-cli --help` or `--tmx-cli --version`. A copy named `tmx` selects CLI
 mode even without arguments. The admitted executable with no arguments remains
-the Backend. Invalid arguments never enter Host stdio. `--tmx-picker` is reserved
-and currently refuses. There is no public endpoint or credential-path option.
+the Backend. Invalid arguments never enter Host stdio. `--tmx-picker` is a private native-helper entry, not a CLI command. There is no public endpoint or credential-path option.
 
 ```text
 tmx workspaces
@@ -157,7 +155,7 @@ five seconds and closes its socket; it cannot guarantee the writer's disk I/O.
 ## Credential custody
 
 The server still persists **verifiers only** under its supplied Package Data
-Directory (configVersion 1). ClientStore format 1 intentionally persists bearer
+Directory (configVersion 1, migrating to 2 only on managed authority commit). ClientStore format 1 intentionally persists bearer
 credentials in owned private OS-user files at
 `~/.local/share/teamarness/external-gateway/`. The fixed managed command path is
 `~/.local/bin/tmx`; PATH setup is optional and shell startup files are not edited.
@@ -180,7 +178,7 @@ reads never reclaim them or promote their contents.
 
 One local Installation/continuity/origin tuple per Workspace is supported.
 Another profile is a conflict, not a winner/default or implicit handover. Use
-the original app's disconnect before changing profiles once setup is available.
+the original app's disconnect before changing profiles.
 If that profile is unavailable, deliberately remove only the exact conflicting
 private record after inspecting the conflict. **Local deletion cannot revoke
 the old token.** Revoke before Package removal; retained commands or records do
@@ -250,8 +248,7 @@ external cleanup after inspection; no false rollback/cleanup claim is made.
 A command can be published while skill publication fails; no access was authorized.
 
 The typed Backend coordinator supplies explicit consent and actual activation/
-reload refresh through an injected-home seam. Production UI/picker integration
-is separate. Tests never invoke setup against the ordinary OS home. Acquired
+reload refresh through an injected-home seam. Both mount views use the native picker and coordinator. Tests never invoke setup against the ordinary OS home. Acquired
 native output execution/update and real harness skill discovery remain M1/M3/M4.
 
 
@@ -271,7 +268,7 @@ then returns an operation ID. Repeated accepted apply discovers that operation;
 Observer cancellation, remount and acceptance-response loss do not duplicate
 accepted work. No setup intent enables a listener or expands tool selections.
 Connect/rotate require a running committed listener. Install-skill does not
-require credentials. Phase 5 supplies the production folder picker and UI.
+require credentials. The Package-owned picker supplies bounded mount-scoped selection leases.
 
 One unfinished operation is owned per Instance. Its private format-1 client
 journal is under the private client state's `setup` namespace, not server policy.

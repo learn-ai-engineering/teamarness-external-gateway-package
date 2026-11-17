@@ -299,3 +299,17 @@ shape remain independent. Native focus/installed M1–M5 remain Don-owned pendin
 `tmx --licenses` retrieves them offline before runtime/home/network/AppKit. Preserve
 upstream text/checksums when changing native dependencies; assembled checks compare
 the entire resource in both CLI entry modes, without adding an asset category.
+
+Onboarding Phase 7 adopts one canonical generated four-tree snapshot from committed
+H `46a95356572edc38b3381bb349c9d66ede918fd0` (dirty:false), UI mount contract 3.
+No vendor source is hand-patched. Preserve G's exact rustix/native dependencies and
+locks; no Host checkout path is a build dependency. `controls.ts` owns the shared
+main/Configuration presentation, while Policy alone owns authorization. Settings
+adds tokens below Shell-owned header/tabs; only main renders the optional own-
+Configuration gear. No internal view tabs or editable-port UI. Catalog refresh
+never enables/restarts the listener. Bind dismissal is presentation-only; explicit
+retry uses listener.set true only while stopped on the committed saved port.
+Package disable requires confirmation. One summary/tool page and one active
+refresh remain bounded; closing either view clears observations, picker leases,
+secrets and timers, never an accepted setup apply. Manual M1–M5/native packaged
+qualification remain pending, not inferred from generated provenance or UI tests.

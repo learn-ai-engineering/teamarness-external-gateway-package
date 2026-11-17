@@ -1,7 +1,7 @@
 import { describePackageError, isAbortError, packageErrorCode } from "@teamarness/package-ui-sdk";
 import type { Contract, PackageContract, Tool } from "./contract.generated";
 import type { Client } from "./settings";
-import { action, node } from "./dom";
+import { action, icon, node, toggle } from "./dom";
 
 type Requests = PackageContract["requests"];
 type Mutation = <K extends "external-gateway.package.set" | "external-gateway.tool.set">(operation: K, payload: Requests[K]["request"]) => Promise<void>;
@@ -28,7 +28,19 @@ export function catalogView(root: HTMLElement, client: Client, mutate: Mutation)
   const message = node("p", "Loading Packages…"); message.setAttribute("aria-live", "polite");
   const rows = node("section");
   const pages = node("nav"); pages.setAttribute("aria-label", "Catalog pages");
-  root.append(node("h2", "Packages and exact tools"), node("p", "Enable only reviewed, displayed contracts. Package enable selects no tools; added tools stay off. Disable Package removes all its saved choices, including other pages. Polling refreshes this page every five seconds while settings is open."), action("Refresh", () => { void refresh(); }), message, error, rows, pages);
+  const heading = node("div"); heading.className = "section-title";
+  const actions = node("div"); actions.className = "actions";
+  const info = node("section"); info.hidden = true;
+  info.append(node("p", "All tokens share the same Package and exact tool permissions. Package enable selects no tools; added tools stay off. Writes act as the local Workspace Person. Disable Package removes every saved tool choice, including other pages. This page refreshes every five seconds while open."));
+  actions.append(icon("About shared access", "ⓘ", () => { info.hidden = !info.hidden; }), icon("Refresh available Packages", "↻", () => { void refresh(); }));
+  heading.append(node("small", "Shared by every connection"), actions);
+  const confirmation = node("dialog"); confirmation.setAttribute("aria-label", "Confirm Package disable");
+  const closeConfirmation = () => { confirmation.close(); confirmation.replaceChildren(); };
+  const confirmDisable = (provider: string | null, list: readonly Contract[], title: string) => {
+    confirmation.replaceChildren(node("h3", `Disable ${title}?`), node("p", "This removes every saved tool permission for this Package, including other pages. Re-enabling does not restore them."), action("Cancel disable", closeConfirmation), action("Disable Package", () => { closeConfirmation(); void mutate("external-gateway.package.set", { provider, enabled: false, contracts: choices(list) }); }));
+    confirmation.showModal();
+  };
+  root.append(heading, info, message, error, rows, pages, confirmation);
   const eligible = (c: Contract) => c.available && c.provider !== null && c.guideEligibility === "eligible";
   const choices = (list: readonly Contract[]) => list.map(c => ({ contract: c.contract, major: c.major }));
   function render() {
@@ -42,11 +54,15 @@ export function catalogView(root: HTMLElement, client: Client, mutate: Mutation)
       const first = group[0];
       const title = first.displayName ?? first.provider ?? "Unavailable Provider";
       const section = node("section"); section.className = "package";
-      section.append(node("h3", title), node("code", first.provider ?? "Provider unavailable"));
-      if (first.provider) {
-        const allowed = group.filter(eligible);
-        section.append(action(`Enable displayed contracts · ${title}`, () => { void mutate("external-gateway.package.set", { provider: first.provider, enabled: true, contracts: choices(allowed) }); }, allowed.length === 0), action(`Disable Package · ${title}`, () => { void mutate("external-gateway.package.set", { provider: first.provider, enabled: false, contracts: choices(group) }); }));
-      }
+      const heading = node("div"); heading.className = "package-row";
+      heading.append(node("h3", title));
+      const allowed = group.filter(eligible);
+      const enabled = group.some(c => c.selected);
+      heading.append(toggle(`Enable ${title} access`, enabled, () => {
+        if (enabled) confirmDisable(first.provider, group, title);
+        else if (first.provider) void mutate("external-gateway.package.set", { provider: first.provider, enabled: true, contracts: choices(allowed) });
+      }, !enabled && allowed.length === 0));
+      section.append(heading);
       for (const contract of group) {
         const row = node("section");
         row.append(node("h4", `${contract.contract} · major ${contract.major}`), node("p", contract.selected ? "Package selected" : "Package off"));
@@ -54,17 +70,20 @@ export function catalogView(root: HTMLElement, client: Client, mutate: Mutation)
         else if (contract.guideEligibility !== "eligible") row.append(node("p", "Missing runtime guide: this contract cannot be enabled."));
         else {
           if (contract.selected && !contract.hostEnabled) row.append(node("p", "Host selection missing. Review and explicitly re-enable; it is never repaired automatically."));
-          row.append(action(`Tools · ${contract.contract}`, () => { selected = contract.contract; offset = 0; tools = []; navigate(); }));
+          if (enabled && !contract.selected) row.append(action(`Enable contract · ${contract.contract}`, () => { void mutate("external-gateway.package.set", { provider: contract.provider, enabled: true, contracts: choices([contract]) }); }));
+          const expand = action(`Tools · ${contract.contract}`, () => { selected = selected === contract.contract ? undefined : contract.contract; offset = 0; tools = []; navigate(); }, !contract.selected);
+          expand.setAttribute("aria-expanded", String(selected === contract.contract && contract.selected)); row.append(expand);
+          if (contract.selected && !contract.hostEnabled) row.append(action(`Review access · ${contract.contract}`, () => { void mutate("external-gateway.package.set", { provider: contract.provider, enabled: true, contracts: choices([contract]) }); }));
         }
-        if (!contract.available && contract.provider === null && (contract.selected || contract.hostEnabled)) row.append(action(`Remove unavailable · ${contract.contract}`, () => { void mutate("external-gateway.package.set", { provider: contract.provider, enabled: false, contracts: choices([contract]) }); }));
-        if (contract.contract === selected && eligible(contract)) {
+        if (!contract.available && contract.provider === null && (contract.selected || contract.hostEnabled)) row.append(action(`Remove unavailable · ${contract.contract}`, () => { confirmDisable(contract.provider, [contract], contract.contract); }));
+        if (contract.contract === selected && eligible(contract) && contract.selected && contract.hostEnabled) {
           row.append(node("p", "Guide included automatically when any operation is selected. All tokens share every selection; writes act as the local Workspace Person and can have lasting effects. Streams remain live until closed or denied."));
           for (const tool of tools) {
             const line = node("div");
             const shape = tool.kind === "command" ? "Write" : tool.kind === "event" ? "Event" : tool.delivery === "stream" ? "Streaming query" : "Read";
             line.append(node("strong", shape), node("code", tool.port), node("p", tool.reviewRequired ? "Review required: schema, Provider or major changed. Re-enable explicitly." : tool.selected ? "Selected" : "Off"));
             if (tool.eligible) {
-              line.append(action(`${tool.reviewRequired ? "Review and enable" : tool.selected ? "Disable" : "Enable"} ${shape.toLowerCase()} ${tool.port}`, () => { void mutate("external-gateway.tool.set", { contract: contract.contract, major: contract.major, provider: contract.provider!, port: tool.port, fingerprint: tool.fingerprint, enabled: tool.reviewRequired || !tool.selected }); }));
+              line.append(toggle(`${tool.reviewRequired ? "Review and enable" : tool.selected ? "Disable" : "Enable"} ${shape.toLowerCase()} ${tool.port}`, tool.selected && !tool.reviewRequired, () => { void mutate("external-gateway.tool.set", { contract: contract.contract, major: contract.major, provider: contract.provider!, port: tool.port, fingerprint: tool.fingerprint, enabled: tool.reviewRequired || !tool.selected }); }));
               if (tool.reviewRequired) line.append(action(`Disable ${tool.port}`, () => { void mutate("external-gateway.tool.set", { contract: contract.contract, major: contract.major, provider: contract.provider!, port: tool.port, fingerprint: tool.fingerprint, enabled: false }); }));
             } else line.append(node("p", tool.port === "runtime.guide" ? "Required guide" : "Unsupported shape"));
             row.append(line);
@@ -112,7 +131,7 @@ export function catalogView(root: HTMLElement, client: Client, mutate: Mutation)
       }
       if (!alive || version !== generation || controller.signal.aborted) return;
       let detail: { tools: readonly Tool[]; nextOffset: number | null } = { tools: [], nextOffset: null };
-      if (selected && page.contracts.some(c => c.contract === selected && eligible(c))) {
+      if (selected && page.contracts.some(c => c.contract === selected && eligible(c) && c.selected && c.hostEnabled)) {
         detail = await client.request("external-gateway.catalog.page", { contract: selected, offset }, { signal: controller.signal });
       }
       if (!alive || version !== generation || controller.signal.aborted) return;
@@ -135,6 +154,6 @@ export function catalogView(root: HTMLElement, client: Client, mutate: Mutation)
   return {
     pause: () => { paused = true; generation++; clearTimeout(timer); clearTimeout(deadline); active?.abort(); },
     resume: () => { paused = false; if (active) queued = true; else void refresh(); },
-    stop: () => { alive = false; generation++; clearTimeout(timer); clearTimeout(deadline); active?.abort(); contracts = []; tools = []; },
+    stop: () => { alive = false; generation++; clearTimeout(timer); clearTimeout(deadline); active?.abort(); contracts = []; tools = []; closeConfirmation(); },
   };
 }

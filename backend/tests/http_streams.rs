@@ -996,3 +996,48 @@ async fn managed_generation_replacement_and_revoke_close_idle_streams_without_ov
     f.policy.authenticate(&manual).await.unwrap();
     f.dispose().await;
 }
+
+#[tokio::test]
+async fn catalog_refresh_does_not_restart_listener_or_interrupt_a_live_stream() {
+    let (_dir, mut h, script, port, bearer) = setup().await;
+    let mut stream = open(port, &bearer, "watch.item", json!({})).await;
+    assert!(headers(&mut stream).await.starts_with("HTTP/1.1 200"));
+    assert_eq!(frame(&mut stream).await["type"], "ready");
+    let before = h
+        .request("external-gateway.status.get", json!({}))
+        .await
+        .unwrap();
+    h.request("external-gateway.catalog.page", json!({}))
+        .await
+        .unwrap();
+    h.request(
+        "external-gateway.catalog.page",
+        json!({"contract":"dev.test.reads","offset":0}),
+    )
+    .await
+    .unwrap();
+    let after = h
+        .request("external-gateway.status.get", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(before, after);
+    assert_eq!(after["port"], port);
+    assert_eq!(after["running"], true);
+    assert_eq!(script.recorded_opens().len(), 1);
+    assert!(
+        script
+            .stream()
+            .send(json!({"$teamarnessPortEnvelope":1,"$teamarnessPortValue":{"afterRefresh":true}}))
+            .await
+    );
+    assert_eq!(
+        frame(&mut stream).await,
+        json!({"type":"value","value":{"afterRefresh":true}})
+    );
+    script.stream().close("completed").await;
+    assert_eq!(
+        frame(&mut stream).await,
+        json!({"type":"end","reason":"completed"})
+    );
+    h.shutdown().await.unwrap();
+}

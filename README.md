@@ -35,25 +35,25 @@ One shared policy applies to every valid token. Package enable alone selects no 
 
 ## Provenance and dependencies
 
-Foundation template 2 received an authorized one-time canonical four-tree refresh generated from clean committed Host SDK revision `8f3a64367988c8860527ce3fbcc9a676d2646c1d`. `teamarness-authoring.json` records `sdkRevisionDirty:false`, Package Process 1.1, UI host 2 and four exact vendor digests. `npm run check:vendor` independently recomputes them. There is no general in-place updater. Vendor source was not hand-patched. Confirmed streams require Provider process 1.1 support; legacy setup is refused clearly, without dropping ordinary compatible calls.
+Foundation template 2 received an authorized one-time canonical four-tree refresh generated from clean committed Host SDK revision `46a95356572edc38b3381bb349c9d66ede918fd0`. `teamarness-authoring.json` records `sdkRevisionDirty:false`, Package Process 1.1, UI host 3 and four exact vendor digests. `npm run check:vendor` independently recomputes them. There is no general in-place updater. Vendor source was not hand-patched. Confirmed streams require Provider process 1.1 support; legacy setup is refused clearly, without dropping ordinary compatible calls.
 
 All Rust/npm direct versions are exact. Cargo/npm lockfiles belong to this project. G-only rustix 1.1.4 (std/fs/process, default features off) was explicitly approved for safe descriptor-relative no-follow file handling and UID checks, using the already qualified Host lock version. Source notices and dual MIT/Apache licenses remain with vendored trees. New third-party crates retain their upstream licenses; see `docs/dependencies.md`.
 
 ## Security boundary
 
-Configuration uses private owned files, bounded serialized writes and durable replacement. The server stores only domain-separated SHA-256 token verifiers. Manual create/regenerate returns a one-time bearer; lost responses require regeneration. The separate machine-local ClientStore format 1 intentionally stores client bearer material in private owned files under the effective OS user’s home, outside the Package Data Directory. These are plaintext OS-user credentials, not encrypted or hostile-same-user protected. The typed Backend setup coordinator publishes credentials without bearer copying; production picker/UI integration follows separately. Do not store bearer values, private profiles or model credentials in this repository or evidence.
+Configuration uses private owned files, bounded serialized writes and durable replacement. The server stores only domain-separated SHA-256 token verifiers. Manual create/regenerate returns a one-time bearer; lost responses require regeneration. The separate machine-local ClientStore format 1 intentionally stores client bearer material in private owned files under the effective OS user’s home, outside the Package Data Directory. These are plaintext OS-user credentials, not encrypted or hostile-same-user protected. The typed Backend setup coordinator publishes credentials without bearer copying; native picker and both mount views use that coordinator. Do not store bearer values, private profiles or model credentials in this repository or evidence.
 
 Native Packages run as the current OS user. This is not a sandbox or protection against hostile same-user native code. Local commits and builds do not establish installation, publication or manual usability.
 
 ## Configure and onboard
 
-Open the standard Package settings view (or Settings in this UI). Enable the listener; its numeric URL appears only after bind and durable commit. Change the saved port explicitly if it is occupied. Package rows group contracts by Provider on each bounded page. Enable reviewed displayed contracts, then choose each exact tool separately (Read, Write, Streaming query or Event). New tools are off. A guide is included automatically; missing guides cannot be enabled. Review changed schema/Provider/major choices explicitly. Unavailable saved choices can be removed with Disable Package; Host-only unavailable selections have an exact removal action.
+Main and Shell Configuration share the flat Gateway, Packages and Agent setup controls. Configuration adds token management below the Shell-owned header/tabs; no imitation tabs or editable-port control are rendered. The main gear requests only this Package’s own Configuration through optional mount navigation; older Hosts show a disabled gear with an update explanation. Enable the listener; its numeric URL appears only after bind and durable commit. If the saved port is occupied, dismissing the error changes presentation only: free that same port and explicitly retry. No fallback port is selected. Package rows group contracts by Provider on each bounded page. Enable reviewed displayed contracts before expanding their tools, then choose each exact tool separately (Read, Write, Streaming query or Event). New tools are off. A guide is included automatically; missing guides cannot be enabled. Review changed schema/Provider/major choices explicitly. Disabling a Package requires confirmation and removes all its saved tool choices; re-enabling does not restore them. Unavailable saved choices can be removed with Disable Package; Host-only unavailable selections have an exact removal action.
 
 Create a labeled token and transfer its one-time display to your outside client's local secret mechanism. Dismiss it when done; leaving settings or unmounting clears it. Lost create/regenerate responses require regeneration. All tokens share current tool scope; labels do not identify Principals. Calls that passed final gateway local admission may still be sent to the Host and finish after disable/revoke/regenerate succeeds, including commands waiting inside the SDK. Later admissions use the new policy. Use the external agent's own stop control to stop its work; revocation is not cancellation.
 
-The Overview renders [generic onboarding](docs/onboarding.md), the same Markdown served by authenticated `/v1/onboarding`. Save this guidance without a credential. Discover identifiers, complete schemas and fresh guide bytes before calling. No Backlog-specific client adapter or model setup is needed. The 12-operation bound counts outstanding gateway SDK operations, not simultaneous Provider executions; timeouts do not require a gateway restart or prove execution stopped. At most one delayed retry is permitted only for retryable ordinary reads when current Provider guidance permits; never automatically replay catalog/auth/policy/schema refusals or uncertain outcomes.
+Both views include expandable [generic onboarding](docs/onboarding.md), the same Markdown served by authenticated `/v1/onboarding`. Save this guidance without a credential. Discover identifiers, complete schemas and fresh guide bytes before calling. No Backlog-specific client adapter or model setup is needed. The 12-operation bound counts outstanding gateway SDK operations, not simultaneous Provider executions; timeouts do not require a gateway restart or prove execution stopped. At most one delayed retry is permitted only for retryable ordinary reads when current Provider guidance permits; never automatically replay catalog/auth/policy/schema refusals or uncertain outcomes.
 
-Refresh or page the catalog explicitly; only settings polls its displayed page, with one five-second-bounded refresh at a time and no accumulating all-Provider catalog. Closing settings cancels polling and pending observations, not Backend service. Setup and tokens survive restart/reinstall. Use **Disable and revoke all tokens** before removal when retained access is unwanted.
+Refresh or page the catalog explicitly; each mounted view polls its displayed page, with one five-second-bounded refresh at a time and no accumulating all-Provider catalog. Closing a view cancels polling and pending observations, not Backend service. Setup and tokens survive restart/reinstall. Use **Disable and revoke all tokens** before removal when retained access is unwanted.
 
 ## Membership and listener eligibility
 
@@ -77,7 +77,7 @@ coordinate connect, repair, rotate, disconnect and selected skill installation.
 Preview is read-only, accepts only an opaque folder selection, expires in ten
 minutes and is limited to four plans. Apply rechecks consent and returns an
 owned operation ID; cancelling a UI observer does not cancel accepted work.
-Production folder selection and UI controls arrive in the next phase.
+The native folder picker supplies a bounded mount-scoped selection lease; both views use the same coordinator controls.
 
 Policy remains the only authorization owner. A private client operation journal
 precedes recognized outputs, verifier commit, and atomic credential/endpoint
@@ -102,6 +102,14 @@ uses injected private physical homes; installed production-home M1–M5 are pend
 Managed onboarding is available in both current Package views: choose an optional
 skill folder, preview exact paths/command changes, approve, then follow separate
 command/skill/access results. Repair, rotate and disconnect use the same recoverable
-coordinator; manual tokens remain in Settings. Closing a view cancels its picker
+coordinator; manual tokens remain in Configuration. Closing a view cancels its picker
 and observations, not an accepted setup operation. See [native picker integration](docs/native-picker.md)
 for protocol/lifecycle limits and the still-pending installed/native qualification.
+
+Catalog refresh never sends a listener enable/port-change intent and does not
+restart a live listener or close its streams. The Backend port-change operation
+remains available to declared callers; after a committed change, managed setup
+reports repair-required. Explicit port-only repair republishes the saved endpoint
+without rotating an intact credential. Production revised A, packaged gear/focus,
+acquired native setup and actual harness use remain Don-owned M1–M5; fixture tests
+and canonical vendor comparison are not installed/manual acceptance.

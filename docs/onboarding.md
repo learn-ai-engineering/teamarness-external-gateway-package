@@ -32,7 +32,7 @@ The gateway never replays calls. Inspect error.source, code, retryable and outco
 
 There are 12 outstanding gateway SDK operations, including guides, with nonwaiting busy refusal. Unchanged Host limits may refuse earlier; this is not a promise of 12 simultaneous Provider executions. The 25-second upper HTTP observation budget can end earlier on a Host/SDK/Provider terminal. An SDK terminal releases its local slot, including timeout; no restart is required merely for a completed timeout. An HTTP disconnect alone does not release still-pending SDK work. Requests share a Workspace-wide 8/second, burst-16 budget. Pace discovery and calls; do not spin on busy or rate_limited.
 
-The Person controls listener state, exact Package/tool choices and independently revocable tokens in Package settings. New tools stay off. Setup and tokens survive restart/reinstall at the saved port. Use Disable and revoke all tokens before removal if retained access is unwanted. A port conflict stops the listener without silently choosing a new URL; obtain the explicitly changed URL from the Person.
+The Person controls listener state, exact Package/tool choices and independently revocable tokens in Package settings. New tools stay off. Setup and tokens survive restart/reinstall at the saved port. Use Disable and revoke all tokens before removal if retained access is unwanted. A port conflict stops the listener without silently choosing a new URL. Ask the Person to free the saved port and explicitly retry that port. Dismissing the error does not clear the failure; catalog refresh never restarts the listener. An explicit Backend port change requires managed endpoint repair, retaining an intact credential generation.
 
 Canonical membership loss also stops the listener, including manifest, onboarding and cached schemas; old connections retire within five seconds after stop begins. Saved setup remains, but a removed identity stays stopped across restart/reload/reinstall. Membership-monitoring failure closes access with an unavailable status. Only a fresh valid membership observation may restore eligibility; a terminated monitoring stream needs explicit Package recovery/reload. Neither recovery nor notifications override manual suspension or desired-disabled state. Ask the Person to inspect status rather than repeatedly reconnecting. Already-delivered data cannot be retracted, and already-authorized calls may finish internally without a delivered response.
 
@@ -45,7 +45,7 @@ The embedded portable skill uses a safely quoted absolute command, not raw HTTP
 or copied Provider contracts. Managed command/selected-skill publication modules
 do not by themselves authorize access; the typed Backend setup coordinator
 previews consent, commits managed authority through Policy and publishes private
-client access. Production picker/UI integration follows separately. Cancelling an
+client access. The Package-owned native folder picker supplies a mount-scoped selection; both UI views share setup controls. Cancelling an
 observer does not undo accepted work; inspect status and repair partial effects.
 Managed rotation uses the coordinator, never manual one-time regeneration.
 Disconnect revokes before local cleanup; local deletion alone is not revocation.

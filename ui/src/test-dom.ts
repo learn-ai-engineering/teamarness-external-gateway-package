@@ -7,6 +7,8 @@ export class Element {
   value = "";
   type = "";
   disabled = false;
+  hidden = false;
+  open = false;
   checked = false;
   min = "";
   max = "";
@@ -31,14 +33,21 @@ export class Element {
     if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this);
     this.parent = undefined;
   }
+  showModal(): void { this.open = true; }
+  close(): void { this.open = false; }
   setAttribute(name: string, value: string): void { this.attributes.set(name, value); }
   addEventListener(name: string, listener: () => void): void {
     this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]);
   }
   click(): void {
-    if (this.disabled) return;
+    if (this.disabled || this.hasDisabledFieldset()) return;
     if (this.tagName === "input" && this.type === "checkbox") { this.checked = !this.checked; for (const listener of this.listeners.get("change") ?? []) listener(); }
     for (const listener of this.listeners.get("click") ?? []) listener();
+  }
+  private hasDisabledFieldset(): boolean {
+    let parent = this.parent;
+    while (parent) { if (parent.tagName === "fieldset" && parent.disabled) return true; parent = parent.parent; }
+    return false;
   }
   all(): Element[] { return [this, ...this.children.flatMap(c => c.all())]; }
 }
@@ -48,7 +57,7 @@ export function installDom(): void {
   globalThis.CSSStyleSheet = Sheet as unknown as typeof CSSStyleSheet;
 }
 export function button(root: Element, name: string): Element {
-  const node = root.all().find(e => e.tagName === "button" && e.textContent === name);
+  const node = root.all().find(e => e.tagName === "button" && (e.textContent === name || e.attributes.get("aria-label") === name));
   if (!node) throw new Error(`Missing button: ${name}`);
   return node;
 }

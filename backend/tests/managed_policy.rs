@@ -174,7 +174,9 @@ async fn port_only_repair_keeps_intact_credential_and_generation() {
     let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = socket.local_addr().unwrap().port();
     drop(socket);
-    s.policy.change(Change::Port(port)).await.unwrap();
+    h.request("external-gateway.port.set", json!({"port":port}))
+        .await
+        .unwrap();
     assert_eq!(
         h.request("external-gateway.setup.status", json!({}))
             .await

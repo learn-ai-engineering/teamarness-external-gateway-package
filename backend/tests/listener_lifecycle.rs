@@ -36,9 +36,28 @@ async fn saved_port_is_durable_before_publication_and_resumes_without_fallback()
     assert_eq!(s["desiredEnabled"], true);
     assert_eq!(s["port"], port);
     assert_eq!(s["warning"], "listener_bind_failed");
+    let busy_error = h
+        .request("external-gateway.listener.set", json!({"enabled":true}))
+        .await
+        .unwrap_err();
+    assert_eq!(busy_error.code(), "external_gateway.unavailable");
+    let still_busy = h
+        .request("external-gateway.status.get", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(still_busy, s);
     drop(conflict);
-    h.suspend().await.unwrap();
-    h.recover().await.unwrap();
+    h.request("external-gateway.listener.set", json!({"enabled":true}))
+        .await
+        .unwrap();
+    let resumed = h
+        .request("external-gateway.status.get", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(resumed["port"], port);
+    assert_eq!(resumed["running"], true);
+    assert_eq!(resumed["desiredEnabled"], true);
+    assert_eq!(resumed["warning"], Value::Null);
     assert_eq!(get(port, &bearer, "/v1").await.0, 200);
     h.dispose().await.unwrap();
     h.shutdown().await.unwrap();

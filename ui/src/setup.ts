@@ -50,7 +50,7 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
   };
   const previewIntent = async (intent: SetupIntent) => {
     if (!alive || busy || picking) return;
-    busy = true; controls.disabled = true; error.textContent = ""; discardPreview(); showDestination();
+    details.open = true; busy = true; controls.disabled = true; error.textContent = ""; discardPreview(); showDestination();
     const revision = previewRevision;
     try {
       const selected = intent !== "disconnect" && selection ? { selectionId: selection.selectionId } : {};
@@ -86,7 +86,9 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
     finally { busy = false; if (alive) { controls.disabled = false; showDestination(); } }
   };
   controls.append(...(["connect", "repair", "rotate", "disconnect", "install-skill"] as const).map(intent => action(`Preview ${intent}`, () => { void previewIntent(intent); })));
-  section.append(node("h2", "Managed command and access setup"), node("p", "Preview first, then explicitly approve. Enable the listener in Settings before connecting; select exact tools there separately. Setup never enables the listener or selects tools. Accepted setup continues independently of this view. Manual tokens remain available in Settings."), destination, controls, previewArea, progress, error); root.append(section); showDestination();
+  const details = node("details"); details.className = "long-details";
+  details.append(node("summary", "Set up CLI & skill"), node("p", "Preview first, then explicitly approve. Enable the listener in Gateway before connecting; select exact tools separately. Setup never enables the listener or selects tools. Accepted setup continues independently of this view. Manual tokens remain available in Configuration."), destination, controls, previewArea);
+  section.append(details, progress, error); root.append(section); showDestination();
   const revision = statusRevision;
   void client.request("external-gateway.setup.status", {}, { signal: pending.signal }).then(value => { if (alive && revision === statusRevision) showStatus(value); }).catch(fail);
   void client.subscribe("external-gateway.setup.watch", {}, value => { if (alive) { statusRevision++; showStatus(value); } }, { onTerminated: cause => { if (alive) { if (cause) fail(cause); else error.textContent = "Setup updates ended. Reopen the view to observe the current operation."; } } }).then(stream => { if (alive) watch = stream; else void stream.close().catch(() => undefined); }).catch(fail);
