@@ -34,7 +34,7 @@ export function controls(root: HTMLElement, client: Client, refreshStatus: () =>
     if (!value.running && value.desiredEnabled && value.port && value.warning === "listener_bind_failed") actions.append(icon(`Retry listener on port ${value.port}`, "↻", () => { if (status && !status.running) void mutate("external-gateway.listener.set", { enabled: true }); }, busy || value.storageFailed));
     actions.append(toggle("Enable gateway listener", value.desiredEnabled, () => { if (status) void mutate("external-gateway.listener.set", { enabled: !status.desiredEnabled }); }, busy || value.storageFailed));
     line.append(details, actions); listener.replaceChildren(line);
-    if (value.storageFailed) listener.append(node("p", "Storage failed. Access is closed until a durable action reconciles state."));
+    if (value.storageFailed) listener.append(node("p", "Storage failed. Access is closed until a durable action reconciles state. After restoring storage, use Configuration to revoke a token or Disable and revoke all tokens again."));
     if (value.warning === "listener_bind_failed") {
       if (!dismissedBind) {
         const warning = node("div"); warning.setAttribute("role", "alert"); warning.append(node("p", `listener_bind_failed: Port ${value.port} is unavailable. Free the saved port, then retry. The saved port will not change.`), action("Dismiss bind error", () => { dismissedBind = true; if (status) render(status); })); listener.append(warning);

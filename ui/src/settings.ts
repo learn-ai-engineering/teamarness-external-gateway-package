@@ -32,22 +32,27 @@ export function settings(root: HTMLElement, client: Client, initial: Status | un
       refreshStatus();
     } catch (cause) {
       if (alive && !isAbortError(cause)) error.textContent = describePackageError(cause);
-    } finally { busy = false; controls.disabled = !!status?.storageFailed; }
+    } finally { busy = false; controls.disabled = false; if (alive && status) update(status); }
   };
   const update = (value: Status) => {
     status = value;
-    controls.disabled = busy || value.storageFailed;
+    controls.disabled = busy;
+    label.disabled = value.storageFailed;
+    create.disabled = value.storageFailed;
     tokens.replaceChildren();
     for (const token of value.tokens) {
       const row = node("div"); row.className = "connection";
-      row.append(node("p", `${token.label} · generation ${token.generation}`), action(`${token.managed ? "Rotate" : "Regenerate"} ${token.label}`, () => { if (token.managed) { clearSecret(); previewSetup("rotate"); } else void mutate("external-gateway.token.regenerate", { id: token.id }); }), action(`Revoke ${token.label}`, () => { void mutate("external-gateway.token.revoke", { id: token.id }); }));
+      const rotate = action(`${token.managed ? "Rotate" : "Regenerate"} ${token.label}`, () => { if (token.managed) { clearSecret(); previewSetup("rotate"); } else void mutate("external-gateway.token.regenerate", { id: token.id }); });
+      rotate.disabled = value.storageFailed;
+      row.append(node("p", `${token.label} · generation ${token.generation}`), rotate, action(`Revoke ${token.label}`, () => { void mutate("external-gateway.token.revoke", { id: token.id }); }));
       tokens.append(row);
     }
   };
-  controls.append(node("label", "Token label"), label, action("Create token", () => {
+  const create = action("Create token", () => {
     if (!label.value.trim() || new TextEncoder().encode(label.value).length > 96) { error.textContent = "Token label must be 1–96 UTF-8 bytes."; return; }
     void mutate("external-gateway.token.create", { label: label.value });
-  }), tokens, action("Disable and revoke all tokens", () => {
+  });
+  controls.append(node("label", "Token label"), label, create, tokens, action("Disable and revoke all tokens", () => {
     clearSecret();
     confirmation.replaceChildren(node("h3", "Disable and revoke all tokens?"), node("p", "Stops listening and revokes every token, including managed access. Admitted work may finish. Installed command and skill files remain."), action("Cancel revoke all", () => { confirmation.close(); }), action("Disable and revoke", () => { confirmation.close(); void mutate("external-gateway.disable-and-revoke-all", {}); }));
     confirmation.showModal();

@@ -68,6 +68,9 @@ struct StoreCut {
     kind: &'static str,
 }
 impl StorageFault for StoreCut {
+    fn before_origin(&self, s: WriteStage) -> std::io::Result<()> {
+        self.cut.hit(format!("origin:{}", stage(s)))
+    }
     fn before(&self, s: WriteStage) -> std::io::Result<()> {
         self.cut.hit(format!("{}:{}", self.kind, stage(s)))
     }
@@ -812,4 +815,225 @@ async fn in_process_explicit_repair_reconciles_uncertain_journal_progress_withou
     assert_eq!(apply(&mut h, "repair").await["phase"], "complete");
     assert_eq!(f.connections().len(), 1);
     h.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn origin_process_death_before_journal_retries_without_adopting_abandoned_bytes() {
+    for point in ["write", "fsync", "rename", "dirsync"] {
+        let f = Fixture::new();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "setup_process_child", "--nocapture"])
+            .env("TMX_SETUP_TEST_DATA", f.data.path().canonicalize().unwrap())
+            .env("TMX_SETUP_TEST_HOME", f.home.path().canonicalize().unwrap())
+            .env("TMX_SETUP_TEST_POINT", format!("origin:{point}"))
+            .env("TMX_SETUP_TEST_INTENT", "connect")
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(77),
+            "{point}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let config = f.data.path().join("config");
+        let published = std::fs::read(config.join("origin")).ok();
+        assert_eq!(published.is_some(), point == "dirsync");
+        let abandoned: Vec<_> = std::fs::read_dir(&config)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .starts_with("origin-")
+            })
+            .map(|p| {
+                let bytes = std::fs::read(&p).unwrap();
+                (p, bytes)
+            })
+            .collect();
+        assert_eq!(abandoned.len(), usize::from(point != "dirsync"));
+        let (mut h, s) = f.start().await;
+        assert!(s.policy.status()["tokens"].as_array().unwrap().is_empty());
+        assert!(f.connections().is_empty());
+        assert_eq!(apply(&mut h, "connect").await["phase"], "complete");
+        let connection = f.connections().remove(0);
+        let origin = std::fs::read_to_string(config.join("origin")).unwrap();
+        assert_eq!(connection.origin_nonce, origin);
+        assert_eq!(
+            s.policy
+                .setup_snapshot()
+                .await
+                .unwrap()
+                .config
+                .managed
+                .unwrap()
+                .origin_nonce,
+            origin
+        );
+        if let Some(published) = published {
+            assert_eq!(published, origin.as_bytes());
+        }
+        for (path, bytes) in abandoned {
+            assert_eq!(std::fs::read(path).unwrap(), bytes);
+            if bytes.len() == 64 {
+                assert_ne!(bytes, origin.as_bytes());
+            }
+        }
+        s.policy.authenticate(&connection.bearer).await.unwrap();
+        assert_eq!(s.policy.status()["tokens"].as_array().unwrap().len(), 1);
+        h.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn origin_initial_fault_then_explicit_connect_retry_uses_same_published_association() {
+    for point in ["write", "fsync", "rename", "dirsync"] {
+        let f = Fixture::new();
+        let cut = Arc::new(Cut {
+            point: format!("origin:{point}"),
+            armed: AtomicBool::new(true),
+            death: false,
+        });
+        let mut e = f.environment();
+        e.storage_fault = Some(Arc::new(StoreCut {
+            cut,
+            kind: "policy",
+        }));
+        let (mut h, s) = f.start_with(e).await;
+        h.request("external-gateway.listener.set", json!({"enabled":true}))
+            .await
+            .unwrap();
+        assert_eq!(apply(&mut h, "connect").await["phase"], "repair-required");
+        assert!(s.policy.status()["tokens"].as_array().unwrap().is_empty());
+        assert!(f.connections().is_empty());
+        assert_eq!(apply(&mut h, "connect").await["phase"], "complete");
+        let c = f.connections().remove(0);
+        assert_eq!(
+            c.origin_nonce,
+            std::fs::read_to_string(f.data.path().join("config/origin")).unwrap()
+        );
+        h.shutdown().await.unwrap();
+        let (h, s) = f.start().await;
+        assert_eq!(f.connections()[0].origin_nonce, c.origin_nonce);
+        s.policy.authenticate(&c.bearer).await.unwrap();
+        h.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn explicit_denial_retry_after_transient_storage_failure_durably_clears_warning_without_restart()
+ {
+    for target in ["manual", "managed"] {
+        for retry_all in [false, true] {
+            let f = Fixture::new();
+            let cut = Arc::new(Cut {
+                point: "policy:write".into(),
+                armed: AtomicBool::new(false),
+                death: false,
+            });
+            let mut e = f.environment();
+            e.storage_fault = Some(Arc::new(StoreCut {
+                cut: cut.clone(),
+                kind: "policy",
+            }));
+            let (mut h, s) = f.start_with(e).await;
+            connect(&mut h).await;
+            let managed = f.connections().remove(0);
+            let manual = h
+                .request("external-gateway.token.create", json!({"label":"Manual"}))
+                .await
+                .unwrap();
+            let id = if target == "manual" {
+                manual["id"].as_str().unwrap()
+            } else {
+                &managed.token_id
+            };
+            if retry_all {
+                // Exercise the zero-token denial intersection as well as a remaining
+                // manual/managed row: only revoke-all is then visible to the caller.
+                let other = if target == "manual" {
+                    &managed.token_id
+                } else {
+                    manual["id"].as_str().unwrap()
+                };
+                h.request("external-gateway.token.revoke", json!({"id":other}))
+                    .await
+                    .unwrap();
+            }
+            let mut watch = h
+                .subscribe("external-gateway.status.watch", json!({}))
+                .await
+                .unwrap();
+            watch.next_event().await.unwrap().unwrap();
+            cut.armed.store(true, Ordering::SeqCst);
+            assert_eq!(
+                h.request("external-gateway.token.revoke", json!({"id":id}))
+                    .await
+                    .unwrap_err()
+                    .code(),
+                "external_gateway.storage_failed"
+            );
+            let failed = watch.next_event().await.unwrap().unwrap();
+            assert_eq!(failed["storageFailed"], true);
+            assert_eq!(
+                failed["tokens"].as_array().unwrap().len(),
+                usize::from(!retry_all)
+            );
+            let disk = teamarness_generated_package_backend::config::FileStore::open(
+                &f.data.path().canonicalize().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                disk.read().unwrap().tokens.len(),
+                if retry_all { 1 } else { 2 }
+            );
+            assert!(s.policy.authenticate(&managed.bearer).await.is_err());
+            assert!(
+                s.policy
+                    .authenticate(manual["bearer"].as_str().unwrap())
+                    .await
+                    .is_err()
+            );
+            assert!(s.policy.setup_snapshot().await.is_err());
+            // The one-shot IO fault is now removed. A status read cannot clear the latch.
+            assert_eq!(
+                h.request("external-gateway.status.get", json!({}))
+                    .await
+                    .unwrap()["storageFailed"],
+                true
+            );
+            if retry_all {
+                h.request("external-gateway.disable-and-revoke-all", json!({}))
+                    .await
+                    .unwrap();
+            } else {
+                let remaining = &failed["tokens"][0]["id"];
+                h.request("external-gateway.token.revoke", json!({"id":remaining}))
+                    .await
+                    .unwrap();
+            }
+            let reconciled = watch.next_event().await.unwrap().unwrap();
+            assert_eq!(reconciled["storageFailed"], false);
+            assert_eq!(reconciled["tokens"], json!([]));
+            assert!(disk.read().unwrap().tokens.is_empty());
+            if retry_all {
+                assert!(!disk.read().unwrap().desired_enabled);
+            }
+            assert!(s.policy.authenticate(&managed.bearer).await.is_err());
+            assert!(
+                s.policy
+                    .authenticate(manual["bearer"].as_str().unwrap())
+                    .await
+                    .is_err()
+            );
+            watch.close().await;
+            h.shutdown().await.unwrap();
+            let (h, s) = f.start().await;
+            assert!(s.policy.status()["tokens"].as_array().unwrap().is_empty());
+            assert!(s.policy.authenticate(&managed.bearer).await.is_err());
+            h.shutdown().await.unwrap();
+        }
+    }
 }

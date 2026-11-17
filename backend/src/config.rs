@@ -163,6 +163,9 @@ pub enum WriteStage {
 // Fault injection occurs at actual durability boundaries, never in a fake filesystem.
 pub trait StorageFault: Send + Sync {
     fn before(&self, stage: WriteStage) -> Result<(), std::io::Error>;
+    fn before_origin(&self, _stage: WriteStage) -> Result<(), std::io::Error> {
+        Ok(())
+    }
 }
 struct NoFault;
 impl StorageFault for NoFault {
@@ -255,22 +258,67 @@ impl FileStore {
         entropy: &dyn crate::tokens::Entropy,
     ) -> Result<String, StorageError> {
         if let Some(s) = self.read_origin()? {
+            // Also finishes a prior publication whose directory sync was uncertain.
+            io(self.directory.sync_all())?;
             return Ok(s);
         }
         let mut bytes = [0; 32];
         entropy.fill(&mut bytes).map_err(|_| StorageError::Io)?;
         let s = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
-        let mut file: File = io(sys::openat(
-            &self.directory,
-            "origin",
-            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::RUSR | Mode::WUSR,
-        ))?
-        .into();
-        io(file.write_all(s.as_bytes()))?;
-        io(file.sync_all())?;
-        io(self.directory.sync_all())?;
-        Ok(s)
+        // Only this invocation's exclusive stage is ours to remove. A pre-publication
+        // death may leave an orphan; retries never scan, adopt or reclaim those bytes.
+        for _ in 0..8 {
+            let mut suffix = [0; 16];
+            entropy.fill(&mut suffix).map_err(|_| StorageError::Io)?;
+            let name = format!(
+                "origin-{}.tmp",
+                suffix
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>()
+            );
+            let mut file: File = match sys::openat(
+                &self.directory,
+                name.as_str(),
+                OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::RUSR | Mode::WUSR,
+            ) {
+                Ok(fd) => fd.into(),
+                Err(rustix::io::Errno::EXIST) => continue,
+                Err(_) => return Err(StorageError::Io),
+            };
+            let result = (|| {
+                owned(&file, false)?;
+                self.origin_stage(WriteStage::Write)?;
+                io(file.write_all(s.as_bytes()))?;
+                self.origin_stage(WriteStage::FileSync)?;
+                io(file.sync_all())?;
+                self.origin_stage(WriteStage::Rename)?;
+                match sys::renameat_with(
+                    &self.directory,
+                    name.as_str(),
+                    &self.directory,
+                    "origin",
+                    sys::RenameFlags::NOREPLACE,
+                ) {
+                    Ok(()) => {}
+                    Err(rustix::io::Errno::EXIST) => {
+                        // A competing accepted setup won. Validate it, never replace it.
+                        let winner = self.read_origin()?.ok_or(StorageError::Io)?;
+                        io(self.directory.sync_all())?;
+                        return Ok(winner);
+                    }
+                    Err(_) => return Err(StorageError::Io),
+                }
+                self.origin_stage(WriteStage::DirectorySync)?;
+                io(self.directory.sync_all())?;
+                Ok(s.clone())
+            })();
+            // Never unlink the final origin, including after uncertain directory sync.
+            let _ = sys::unlinkat(&self.directory, name.as_str(), sys::AtFlags::empty());
+            return result;
+        }
+        Err(StorageError::Io)
     }
     pub fn with_fault(mut self, fault: Arc<dyn StorageFault>) -> Self {
         self.fault = fault;
@@ -373,6 +421,11 @@ impl FileStore {
             "state.tmp",
             sys::AtFlags::empty(),
         ))
+    }
+    fn origin_stage(&self, stage: WriteStage) -> Result<(), StorageError> {
+        self.fault
+            .before_origin(stage)
+            .map_err(|_| StorageError::Io)
     }
     fn stage(&self, stage: WriteStage) -> Result<(), StorageError> {
         self.fault.before(stage).map_err(|_| StorageError::Io)

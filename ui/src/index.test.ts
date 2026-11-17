@@ -338,3 +338,49 @@ it.each(["main", "settings"] as const)("keeps storage failures closed with clean
   expect(client.calls.filter(c => c.operation.endsWith(".set"))).toHaveLength(0);
   await unmount?.(); expect(root.children).toHaveLength(0); expect(vi.getTimerCount()).toBe(0);
 });
+
+it("keeps explicit denial recovery available after a failed revoke with zero visible tokens", async () => {
+  let current: Status = { ...status, tokens: [{ id: "one", label: "Manual", generation: 1 }] };
+  const retry = deferred<{ ok: boolean; warning: null }>();
+  const client = fake({
+    "external-gateway.status.get": () => current,
+    "external-gateway.token.revoke": async () => {
+      current = { ...status, storageFailed: true };
+      await client.emit("external-gateway.status.watch", current);
+      throw createPackageRequestError({ packageError: { code: "external_gateway.storage_failed" } });
+    },
+    "external-gateway.disable-and-revoke-all": async () => {
+      await retry.promise; current = status; return { ok: true, warning: null };
+    },
+  });
+  const root = setup(client, "settings"); await flush();
+  button(root, "Revoke Manual").click(); await flush();
+  expect(root.textContent).toContain("Storage failed. Access is closed");
+  expect(root.textContent).not.toContain("Revoke Manual");
+  field(root, "Token label").value = "unsafe"; button(root, "Create token").click();
+  field(root, "Enable gateway listener").click();
+  button(root, "Disable and revoke all tokens").click();
+  expect(client.calls.filter(c => c.operation === "external-gateway.disable-and-revoke-all")).toHaveLength(0);
+  button(root, "Cancel revoke all").click();
+  button(root, "Disable and revoke all tokens").click();
+  const confirm = button(root, "Disable and revoke"); confirm.click(); confirm.click(); await flush();
+  expect(client.calls.filter(c => c.operation === "external-gateway.disable-and-revoke-all")).toEqual([{ operation: "external-gateway.disable-and-revoke-all", payload: {} }]);
+  expect(root.textContent).toContain("Storage failed. Access is closed");
+  expect(client.calls.some(c => c.operation === "external-gateway.token.create" || c.operation.endsWith(".set"))).toBe(false);
+  button(root, "Disable and revoke all tokens").click();
+  retry.resolve({ ok: true, warning: null }); await flush();
+  expect(root.textContent).not.toContain("Storage failed. Access is closed");
+});
+
+it("allows manual and managed revoke but not creation or rotation while storage is failed", async () => {
+  const current: Status = { ...status, storageFailed: true, tokens: [{ id: "manual", label: "Manual", generation: 1 }, { id: "managed", label: "Managed", generation: 2, managed: true }] };
+  const client = fake({ "external-gateway.status.get": () => current, "external-gateway.token.revoke": () => ({ ok: true, warning: null }) });
+  const root = setup(client, "settings"); await flush();
+  field(root, "Token label").value = "unsafe";
+  for (const name of ["Create token", "Regenerate Manual", "Rotate Managed"]) button(root, name).click();
+  button(root, "Revoke Manual").click(); await flush(); button(root, "Revoke Managed").click(); await flush();
+  expect(client.calls.filter(c => c.operation.includes("token.") || c.operation === "external-gateway.setup.preview")).toEqual([
+    { operation: "external-gateway.token.revoke", payload: { id: "manual" } },
+    { operation: "external-gateway.token.revoke", payload: { id: "managed" } },
+  ]);
+});

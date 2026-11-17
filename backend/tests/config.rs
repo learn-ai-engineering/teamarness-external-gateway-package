@@ -308,3 +308,245 @@ fn unsafe_temp_paths_and_invalid_committed_state_are_preserved() {
         assert_eq!(temp_after.mode(), temp_before.mode(), "{kind}");
     }
 }
+
+#[test]
+fn origin_failed_first_write_child() {
+    let Some(path) = std::env::var_os("TMX_ORIGIN_WRITE_TEST") else {
+        return;
+    };
+    let store = FileStore::open(std::path::Path::new(&path)).unwrap();
+    let existing = store.read_origin().unwrap();
+    let result = store.setup_origin(&teamarness_generated_package_backend::tokens::OsEntropy);
+    if let Some(existing) = existing {
+        assert_eq!(result.unwrap(), existing);
+    } else {
+        assert_eq!(
+            result,
+            Err(teamarness_generated_package_backend::config::StorageError::Io)
+        );
+    }
+}
+
+#[test]
+fn origin_real_first_write_failure_then_restored_io_and_reopen_succeeds() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().canonicalize().unwrap();
+    FileStore::open(&path).unwrap();
+    let output = std::process::Command::new("/bin/bash")
+        .args([
+            "-c",
+            "trap '' XFSZ; ulimit -f 0; exec \"$@\"",
+            "origin-write-test",
+        ])
+        .arg(std::env::current_exe().unwrap())
+        .args(["--exact", "origin_failed_first_write_child", "--nocapture"])
+        .env("TMX_ORIGIN_WRITE_TEST", &path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !path.join("config/origin").exists(),
+        "failed first write published an incomplete origin"
+    );
+    let store = FileStore::open(&path).unwrap();
+    let origin = store
+        .setup_origin(&teamarness_generated_package_backend::tokens::OsEntropy)
+        .unwrap();
+    assert_eq!(origin.len(), 64);
+    assert_eq!(
+        FileStore::open(&path).unwrap().read_origin().unwrap(),
+        Some(origin.clone())
+    );
+    // Established identity needs no file write, even under the same real IO failure.
+    let output = std::process::Command::new("/bin/bash")
+        .args([
+            "-c",
+            "trap '' XFSZ; ulimit -f 0; exec \"$@\"",
+            "origin-established-test",
+        ])
+        .arg(std::env::current_exe().unwrap())
+        .args(["--exact", "origin_failed_first_write_child", "--nocapture"])
+        .env("TMX_ORIGIN_WRITE_TEST", &path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(path.join("config/origin")).unwrap(),
+        origin
+    );
+}
+
+struct OriginFail(WriteStage);
+impl StorageFault for OriginFail {
+    fn before(&self, _: WriteStage) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn before_origin(&self, stage: WriteStage) -> std::io::Result<()> {
+        if stage == self.0 {
+            Err(std::io::Error::other("origin durability failure"))
+        } else {
+            Ok(())
+        }
+    }
+}
+#[test]
+fn origin_durability_faults_retry_without_replacing_published_identity() {
+    use teamarness_generated_package_backend::tokens::OsEntropy;
+    for stage in [
+        WriteStage::Write,
+        WriteStage::FileSync,
+        WriteStage::Rename,
+        WriteStage::DirectorySync,
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().canonicalize().unwrap();
+        let store = FileStore::open(&path)
+            .unwrap()
+            .with_fault(std::sync::Arc::new(OriginFail(stage)));
+        assert!(store.setup_origin(&OsEntropy).is_err());
+        let published = store.read_origin().unwrap();
+        assert_eq!(published.is_some(), stage == WriteStage::DirectorySync);
+        let store = FileStore::open(&path).unwrap();
+        let origin = store.setup_origin(&OsEntropy).unwrap();
+        if let Some(published) = published {
+            assert_eq!(published, origin);
+        }
+        assert_eq!(store.setup_origin(&OsEntropy).unwrap(), origin);
+        assert_eq!(
+            fs::read_to_string(path.join("config/origin")).unwrap(),
+            origin
+        );
+        assert_eq!(
+            fs::metadata(path.join("config/origin"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert!(store.read().unwrap().tokens.is_empty());
+    }
+}
+
+#[test]
+fn origin_unknown_stages_and_invalid_existing_finals_are_never_reclaimed() {
+    use teamarness_generated_package_backend::tokens::{Entropy, EntropyError, OsEntropy};
+    struct Fixed;
+    impl Entropy for Fixed {
+        fn fill(&self, b: &mut [u8]) -> Result<(), EntropyError> {
+            b.fill(0xab);
+            Ok(())
+        }
+    }
+    for kind in ["regular", "symlink", "directory"] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().canonicalize().unwrap();
+        let store = FileStore::open(&path).unwrap();
+        let temp = path.join(format!("config/origin-{}.tmp", "ab".repeat(16)));
+        let sentinel = path.join("sentinel");
+        fs::write(&sentinel, "unrelated").unwrap();
+        match kind {
+            "symlink" => symlink(&sentinel, &temp).unwrap(),
+            "directory" => fs::create_dir(&temp).unwrap(),
+            _ => fs::write(&temp, "unknown staged data").unwrap(),
+        }
+        use std::os::unix::fs::MetadataExt;
+        let before = fs::symlink_metadata(&temp).unwrap();
+        assert!(store.setup_origin(&Fixed).is_err());
+        assert!(store.read_origin().unwrap().is_none());
+        assert_eq!(fs::symlink_metadata(&temp).unwrap().ino(), before.ino());
+        assert_eq!(fs::read_to_string(&sentinel).unwrap(), "unrelated");
+        let origin = store.setup_origin(&OsEntropy).unwrap();
+        assert_ne!(origin, "ab".repeat(32));
+        assert_eq!(fs::symlink_metadata(&temp).unwrap().ino(), before.ino());
+    }
+    for contents in ["", "partial", &"A".repeat(64), &"a".repeat(65)] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().canonicalize().unwrap();
+        let store = FileStore::open(&path).unwrap();
+        let final_path = path.join("config/origin");
+        fs::write(&final_path, contents).unwrap();
+        fs::set_permissions(&final_path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(store.setup_origin(&OsEntropy).is_err());
+        assert_eq!(fs::read_to_string(final_path).unwrap(), contents);
+    }
+}
+
+#[test]
+fn concurrent_origin_publication_is_no_replace_and_returns_one_identity() {
+    use std::sync::{Arc, Barrier};
+    struct Race(Barrier);
+    impl StorageFault for Race {
+        fn before(&self, _: WriteStage) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn before_origin(&self, s: WriteStage) -> std::io::Result<()> {
+            if s == WriteStage::Rename {
+                self.0.wait();
+            }
+            Ok(())
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().canonicalize().unwrap();
+    let fault = Arc::new(Race(Barrier::new(2)));
+    let threads: Vec<_> = (0..2)
+        .map(|_| {
+            let store = FileStore::open(&path).unwrap().with_fault(fault.clone());
+            std::thread::spawn(move || {
+                store
+                    .setup_origin(&teamarness_generated_package_backend::tokens::OsEntropy)
+                    .unwrap()
+            })
+        })
+        .collect();
+    let origins: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+    assert_eq!(origins[0], origins[1]);
+    assert_eq!(
+        FileStore::open(&path).unwrap().read_origin().unwrap(),
+        Some(origins[0].clone())
+    );
+    assert_eq!(fs::read_dir(path.join("config")).unwrap().count(), 1);
+}
+
+#[test]
+fn origin_unknown_final_arriving_at_publication_is_preserved_and_refused() {
+    struct Collision(std::path::PathBuf);
+    impl StorageFault for Collision {
+        fn before(&self, _: WriteStage) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn before_origin(&self, stage: WriteStage) -> std::io::Result<()> {
+            if stage == WriteStage::Rename {
+                use std::io::Write;
+                let mut f = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&self.0)?;
+                f.write_all(b"unknown final")?;
+                fs::set_permissions(&self.0, fs::Permissions::from_mode(0o600))?;
+            }
+            Ok(())
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().canonicalize().unwrap();
+    let final_path = path.join("config/origin");
+    let store = FileStore::open(&path)
+        .unwrap()
+        .with_fault(std::sync::Arc::new(Collision(final_path.clone())));
+    assert_eq!(
+        store.setup_origin(&teamarness_generated_package_backend::tokens::OsEntropy),
+        Err(teamarness_generated_package_backend::config::StorageError::Invalid)
+    );
+    assert_eq!(fs::read(final_path).unwrap(), b"unknown final");
+    assert_eq!(fs::read_dir(path.join("config")).unwrap().count(), 1);
+}
