@@ -35,7 +35,11 @@ export class Element {
   addEventListener(name: string, listener: () => void): void {
     this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]);
   }
-  click(): void { if (!this.disabled) for (const listener of this.listeners.get("click") ?? []) listener(); }
+  click(): void {
+    if (this.disabled) return;
+    if (this.tagName === "input" && this.type === "checkbox") { this.checked = !this.checked; for (const listener of this.listeners.get("change") ?? []) listener(); }
+    for (const listener of this.listeners.get("click") ?? []) listener();
+  }
   all(): Element[] { return [this, ...this.children.flatMap(c => c.all())]; }
 }
 class Sheet { replaceSync(): void { /* browser style boundary */ } }

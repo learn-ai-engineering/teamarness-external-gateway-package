@@ -98,3 +98,10 @@ the installed version; equal bytes/version is unchanged. Consent, ownership
 transfer, same-version changes and collisions retain explicit refusal rules.
 See [CLI custody and recovery](docs/cli.md). All automated Backend/CLI setup
 uses injected private physical homes; installed production-home M1–M5 are pending.
+
+Managed onboarding is available in both current Package views: choose an optional
+skill folder, preview exact paths/command changes, approve, then follow separate
+command/skill/access results. Repair, rotate and disconnect use the same recoverable
+coordinator; manual tokens remain in Settings. Closing a view cancels its picker
+and observations, not an accepted setup operation. See [native picker integration](docs/native-picker.md)
+for protocol/lifecycle limits and the still-pending installed/native qualification.

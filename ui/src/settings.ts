@@ -1,12 +1,13 @@
 import { describePackageError, isAbortError, type TypedPackageClient } from "@teamarness/package-ui-sdk";
 import type { PackageContract, Status } from "./contract.generated";
 import { catalogView } from "./catalog";
+import type { SetupIntent } from "./setup";
 import { action, input, node } from "./dom";
 
 type Requests = PackageContract["requests"];
 export type Client = TypedPackageClient<PackageContract>;
 
-export function settings(root: HTMLElement, client: Client, initial: Status | undefined, refreshStatus: () => void) {
+export function settings(root: HTMLElement, client: Client, initial: Status | undefined, refreshStatus: () => void, previewSetup: (intent: SetupIntent) => void) {
   const pending = new AbortController();
   let alive = true;
   let busy = false;
@@ -43,7 +44,7 @@ export function settings(root: HTMLElement, client: Client, initial: Status | un
     tokens.replaceChildren(node("h3", "Tokens"));
     for (const token of value.tokens) {
       const row = node("div");
-      row.append(node("p", `${token.label} · generation ${token.generation}`), action(`Regenerate ${token.label}`, () => { void mutate("external-gateway.token.regenerate", { id: token.id }); }), action(`Revoke ${token.label}`, () => { void mutate("external-gateway.token.revoke", { id: token.id }); }));
+      row.append(node("p", `${token.label} · generation ${token.generation}`), action(`${token.managed ? "Rotate" : "Regenerate"} ${token.label}`, () => { if (token.managed) { clearSecret(); previewSetup("rotate"); } else void mutate("external-gateway.token.regenerate", { id: token.id }); }), action(`Revoke ${token.label}`, () => { void mutate("external-gateway.token.revoke", { id: token.id }); }));
       tokens.append(row);
     }
   };

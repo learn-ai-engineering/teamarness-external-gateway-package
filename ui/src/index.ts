@@ -2,6 +2,7 @@ import { adoptPackageStyles, describePackageError, isAbortError, typedPackageCli
 import type { PackageContract, Status } from "./contract.generated";
 import { PACKAGE_STYLES } from "./styles";
 import { action, node } from "./dom";
+import { setupView } from "./setup";
 import { settings } from "./settings";
 import onboarding from "../../docs/onboarding.md?raw";
 
@@ -52,12 +53,13 @@ export function mount(context: PackageMountContext): PackageUnmount {
       if (view === name) button.setAttribute("aria-current", "page");
       nav.append(button);
     }
+    const setup = setupView(content, client, refreshStatus);
     if (view === "main") {
       content.append(node("h2", "External-agent onboarding"), node("p", "Give the running URL to your outside client. Supply a token separately through its local secret mechanism. Save these instructions without credentials."), node("pre", onboarding));
-      stopView = () => {};
+      stopView = setup.stop;
     } else {
-      const mounted = settings(content, client, status, refreshStatus);
-      stopView = mounted.stop;
+      const mounted = settings(content, client, status, refreshStatus, intent => { void setup.previewIntent(intent); });
+      stopView = () => { setup.stop(); mounted.stop(); };
       updateView = mounted.update;
     }
   };

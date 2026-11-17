@@ -25,6 +25,10 @@ http.workspace = true
 bytes.workspace = true
 teamarness-package-contract = { path = "../vendor/teamarness/package-contract" }
 
+rfd.workspace = true
+objc2.workspace = true
+objc2-app-kit.workspace = true
+
 [dev-dependencies]
 teamarness-package-sdk = { path = "../vendor/teamarness/package-sdk", features = ["testing"] }
 tempfile.workspace = true
@@ -41,3 +45,7 @@ path = "tests/support/cli_fixture.rs"
 [[example]]
 name = "backend-fixture"
 path = "tests/support/backend_fixture.rs"
+
+[[example]]
+name = "picker-fixture"
+path = "tests/support/picker_fixture.rs"

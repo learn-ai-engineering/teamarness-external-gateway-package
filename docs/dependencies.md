@@ -22,3 +22,54 @@ introduced. Skill Markdown is embedded in the same native executable; final
 validation checks its complete bytes. Effective-user home resolution retains the
 bounded D1 system adapter. Automated output tests inject private physical roots;
 production-home setup is not part of build or smoke validation.
+
+## Native chooser (Package 1.1.0)
+
+Exact approved direct pins are RFD `=0.16.1` (default features off), objc2
+`=0.6.5`, and objc2-app-kit `=0.3.2` (default features off, `std` and
+`NSApplication`). The latter explicit dependency initializes AppKit on the helper's
+OS main thread before synchronous RFD. No async dialog, portal, interpreter,
+network stack or extra artifact is introduced. RFD itself selects additional
+AppKit features needed by its native panel; our explicit features do not remove
+those transitive requirements.
+
+Reviewed Cargo metadata, upstream manifests and retained registry license files:
+RFD, objc2/objc2-encode, objc2-foundation and block2 are MIT;
+objc2-app-kit/core-foundation and dispatch2 are Zlib OR Apache-2.0 OR MIT;
+raw-window-handle is MIT OR Apache-2.0 OR Zlib; log is MIT OR Apache-2.0.
+These are the ten newly compiled native dependencies (including the three direct
+pins). Cargo.lock deliberately also resolves target-conditional futures-task/util
+(MIT OR Apache-2.0), slab (MIT), wasm-bindgen-futures/web-sys (MIT OR Apache-2.0),
+and windows-sys 0.60.2/windows-targets 0.53.5 plus eight architecture support
+packages (MIT OR Apache-2.0). They do not add supported targets. Existing locked
+versions are retained; js-sys gains its newly enabled futures-util dependency.
+Other crates retain their upstream LICENSE/LICENCE notices in registry source;
+objc2 family crate archives instead reference their repository-level LICENSE.md.
+Its exact release-tag text was obtained/reviewed for objc2-0.6.5,
+objc2-encode-4.1.0, block2-0.6.2, dispatch2-0.3.1 and frameworks-0.3.2;
+the latter tag is shared by AppKit/Foundation/CoreFoundation. All five literal
+texts have SHA-256 `7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54`.
+That text retains its Apple SDK licensing discussion rather than asserting a new
+license clearance. Required notices are embedded in
+`backend/resources/THIRD_PARTY_NOTICES.json` with per-component source URLs, tags,
+registry versions, authors and literal-text checksums. The static resource also
+retains encountered existing production notices, including rustix LLVM exception
+and Teamarness notices (113 native normal dependency components, 82 distinct
+literal notices). Missing split-crate notices use the identical repository
+release source, not invented text. No general notice generator/updater was added.
+Installed users retrieve the complete resource via offline `tmx --licenses`;
+final assembly compares those bytes in explicit and basename CLI modes. Thus
+source-free delivery retains notices without adding another artifact category;
+vendored Teamarness notices are unchanged. No license or digest check is waived.
+Final `otool -L` inspection records system framework dependencies separately from
+native/manual acquired-artifact execution qualification.
+
+The resource is a JSON-escaped UTF-8 string so literal upstream CRLF/trailing
+spaces are retained without whitespace-check exceptions. The 295,822 decoded
+bytes have SHA-256 `ec776f9c33537ea40c5049518ba03cd7ded30ed836863a59fb2a856d959e9af3`;
+per-notice original byte hashes remain inside the decoded provenance. Exact raw
+RFD source notice is also an independent test fixture. Native tests pin original
+CRLF/trailing spaces; assembly compares a separate JavaScript JSON decode against
+the Rust CLI output and the encoded resource against the executable bytes.
+
+Encoded resource SHA-256: `7c2f017023a9173d0b586c3e0a20c0c875d5383630aeadcc118c83f52b1b8e12`.

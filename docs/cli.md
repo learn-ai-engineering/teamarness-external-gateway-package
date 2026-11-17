@@ -325,3 +325,8 @@ still supplies the actual admitted source digest. Never patch production dist or
 substitute fixture hashes for the production artifact. These are injected-home
 qualification results, not production OS-home/native installation evidence.
 Installed checks require the disposable OS account/home and M1–M5 observations.
+
+`tmx --licenses` prints embedded third-party license texts and their source
+provenance offline, before home lookup, sockets or AppKit. Like help/version it
+needs no Workspace and accepts no other options. The same native artifact retains
+these notices after managed copy or Package Directory movement.

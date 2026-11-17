@@ -10,6 +10,8 @@ pub mod limits;
 pub mod listener;
 pub mod managed_install;
 mod membership;
+pub mod picker;
+pub mod picker_helper;
 pub mod policy;
 pub mod setup;
 pub mod skill_install;
@@ -35,9 +37,11 @@ pub struct State {
     pub policy: Arc<Policy>,
     membership: membership::Monitor,
     pub setup: Arc<setup::SetupCoordinator>,
+    pub picker: Arc<picker::Picker>,
 }
 impl Drop for State {
     fn drop(&mut self) {
+        self.picker.close();
         self.policy.retire();
     }
 }
@@ -103,13 +107,15 @@ pub fn router_with_environment_and_entropy(
             let policy=Policy::open(store,catalog::Catalog::new(client),entropy,workspace).await?;
             membership.start(&policy).await;
             policy.resume().await;
+            let (source,admitted)=environment.executable(&init)?;
+            let picker=picker::Picker::new(source,admitted);
             let setup=setup::SetupCoordinator::open(policy.clone(),&init,environment).await?;
-            Ok(State{policy,membership,setup})
+            Ok(State{policy,membership,setup,picker})
         }
     })
-    .on_suspend(|s:Arc<State>|async move{s.setup.close();s.policy.suspend().await;s.setup.stop().await;Ok(())})
-    .on_dispose(|s:Arc<State>|async move{s.setup.close();s.policy.suspend().await;s.setup.stop().await;s.policy.dispose().await;s.membership.join().await;Ok(())})
-    .on_resume(|s:Arc<State>|async move{s.setup.resume();s.membership.start(&s.policy).await;s.policy.resume().await;Ok(())})
+    .on_suspend(|s:Arc<State>|async move{s.picker.close();s.setup.close();s.policy.suspend().await;s.picker.stop().await;s.setup.stop().await;Ok(())})
+    .on_dispose(|s:Arc<State>|async move{s.picker.close();s.setup.close();s.policy.suspend().await;s.picker.stop().await;s.setup.stop().await;s.policy.dispose().await;s.membership.join().await;Ok(())})
+    .on_resume(|s:Arc<State>|async move{s.picker.resume();s.setup.resume();s.membership.start(&s.policy).await;s.policy.resume().await;Ok(())})
     .request("external-gateway.status.get",|c:Context<State>,_:Empty|async move{Ok(c.state().policy.status())})
     .request("external-gateway.catalog.page",|c:Context<State>,p:Page|async move{c.state().policy.catalog_page(p.cursor.as_deref(),p.contract.as_deref(),p.offset).await})
     .request("external-gateway.listener.set",|c:Context<State>,p:Enabled|async move{c.state().policy.change(Change::Listener(p.enabled)).await})
@@ -123,6 +129,7 @@ pub fn router_with_environment_and_entropy(
     .request("external-gateway.setup.preview",|c:Context<State>,p:setup::Preview|async move{c.state().setup.preview(p).await})
     .request("external-gateway.setup.apply",|c:Context<State>,p:setup::Apply|async move{c.state().setup.apply(p).await})
     .request("external-gateway.setup.status",|c:Context<State>,_:Empty|async move{Ok(c.state().setup.status().await)})
+    .subscription("external-gateway.setup.choose-skill-folder",|c:Context<State>,_:Empty|async move{c.state().picker.choose(c.state().setup.clone(),c.cancellation().clone())})
     .subscription("external-gateway.setup.watch",|c:Context<State>,_:Empty|async move{
         let (sender,stream)=event_channel(1);let mut status=c.state().setup.receipt_watch();let mut policy=c.state().policy.watch();let cancel=c.cancellation().clone();let setup=c.state().setup.clone();
         tokio::spawn(async move{loop {

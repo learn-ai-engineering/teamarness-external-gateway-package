@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 const expected = {
+  "rfd": "=0.16.1",
+  "objc2": "=0.6.5",
+  "objc2-app-kit": "=0.3.2",
   "base64": "=0.23.1",
   "jsonschema": "=0.56.0",
   "mime": "=0.3.17",

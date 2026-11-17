@@ -245,3 +245,18 @@ describe("Catalog navigation freshness", () => {
     expect(root.textContent).not.toContain("read.stale"); expect(root.textContent).toContain("read.beta");
   });
 });
+
+describe("Managed token coordinator routing", () => {
+  it("routes managed rotation through explicit preview/consent, retaining manual revoke and secret cleanup", async () => {
+    const client = fake({
+      "external-gateway.status.get": () => ({ ...status, tokens: [{ id: "managed", label: "Managed CLI", generation: 1, managed: true }] }),
+      "external-gateway.setup.status": () => ({ operationId: null, intent: null, phase: "idle", command: "unchanged", skill: "not-requested", access: "unchanged", error: null, commandPath: null, skillPath: null }),
+      "external-gateway.setup.preview": () => ({ planId: "rotate-plan", intent: "rotate", commandPath: "/private/fixture/.local/bin/tmx", skillPath: null, credentialChange: true, commandChange: null, skillChange: "not-requested" }),
+      "external-gateway.token.revoke": () => ({ ok: true, warning: null }),
+    });
+    const root = setup(client, "settings"); await flush(); button(root, "Rotate Managed CLI").click(); await flush();
+    expect(client.calls).toContainEqual({ operation: "external-gateway.setup.preview", payload: { intent: "rotate" } }); expect(client.calls.filter(c => c.operation === "external-gateway.token.regenerate")).toHaveLength(0);
+    expect(button(root, "Apply setup").disabled).toBe(true); button(root, "Revoke Managed CLI").click(); await flush(); expect(client.calls).toContainEqual({ operation: "external-gateway.token.revoke", payload: { id: "managed" } });
+    await unmount?.(); expect(root.children).toHaveLength(0);
+  });
+});

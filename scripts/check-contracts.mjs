@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 const read=(p)=>readFileSync(new URL(p,import.meta.url),"utf8");
 const ui=JSON.parse(read("../ui-contract.json"));
 assert.deepEqual(Object.keys(ui.requests).sort(),["status.get","catalog.page","listener.set","port.set","package.set","tool.set","token.create","token.regenerate","token.revoke","disable-and-revoke-all","setup.preview","setup.apply","setup.status"].map(s=>`external-gateway.${s}`).sort());
-assert.deepEqual(Object.keys(ui.subscriptions),["external-gateway.status.watch","external-gateway.setup.watch"]);
+assert.deepEqual(Object.keys(ui.subscriptions),["external-gateway.status.watch","external-gateway.setup.watch","external-gateway.setup.choose-skill-folder"]);
 for(const request of [...Object.values(ui.requests),...Object.values(ui.subscriptions)])assert.equal(request.request.additionalProperties,false);
 const manifest=JSON.parse(read("../teamarness.package.json"));
 assert.deepEqual(manifest.protocol,{major:1,minMinor:1,maxMinor:1});

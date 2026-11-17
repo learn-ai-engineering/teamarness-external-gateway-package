@@ -154,6 +154,13 @@ export type PackageContract = {
       } };
   };
   readonly subscriptions: {
+    readonly "external-gateway.setup.choose-skill-folder": { readonly request: Record<string, never>; readonly event: {
+        readonly "outcome": "selected";
+        readonly "path": string;
+        readonly "selectionId": string;
+      } | {
+        readonly "outcome": "cancelled";
+      } };
     readonly "external-gateway.setup.watch": { readonly request: Record<string, never>; readonly event: SetupStatus };
     readonly "external-gateway.status.watch": { readonly request: Record<string, never>; readonly event: Status };
   };

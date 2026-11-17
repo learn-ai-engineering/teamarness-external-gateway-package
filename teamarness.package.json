@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "identity": "dev.teamarness.external-gateway",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "presentation": {
     "displayName": "External Gateway",
     "description": "Person-authorized, explicitly selected Workspace Ports for external clients."

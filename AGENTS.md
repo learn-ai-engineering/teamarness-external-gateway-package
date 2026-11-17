@@ -281,3 +281,21 @@ commit to v2, preserving manual authority/port/grants/desired. Invalid/future
 state and unsupported downgrade remain untouched. CLI/store major 1, capabilities,
 artifact shape and Package version are independent and unchanged by Phase 4.
 Production picker/UI remains Phase 5; M1–M5 and real-Host qualification remain pending.
+
+`picker.rs` owns one admitted helper child per Instance and at most four selected
+mount-scoped leases. Its empty-input setup subscription establishes promptly;
+there is no browsing lifetime limit. The one selected event ends native work,
+not the selection lease: close/reselect/unmount/lifecycle invalidates selections
+and unaccepted plans, while accepted apply remains independently owned. Child
+kill/reap and lifecycle joins are explicit. `picker_helper.rs` dispatches before
+Tokio, initializes AppKit and runs synchronous RFD on the OS main thread; its
+fixed private request pipe is also the parent-EOF lifeline. Keep 4-KiB path,
+8-KiB frame/stderr and five-second terminal/cleanup budgets, no debug leakage or
+arbitrary helper/script arguments. `picker-fixture` is unassembled fault/lifeline
+evidence, never a claim of actual AppKit or installed behavior. Package version
+1.1.0 is manifest-owned; CLI/store major 1, process 1.1, capabilities and artifact
+shape remain independent. Native focus/installed M1–M5 remain Don-owned pending.
+`cli::THIRD_PARTY_NOTICES_JSON` embeds literal dependency notices and source provenance;
+`tmx --licenses` retrieves them offline before runtime/home/network/AppKit. Preserve
+upstream text/checksums when changing native dependencies; assembled checks compare
+the entire resource in both CLI entry modes, without adding an asset category.

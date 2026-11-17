@@ -8,6 +8,11 @@ import { join } from "node:path";
 export async function smokeCli(executable, version) {
   const template = await readFile(new URL("../backend/resources/teamarness/SKILL.md", import.meta.url));
   assert.ok((await readFile(executable)).includes(template), "final native artifact embeds the complete portable skill");
+  const encodedNotices = await readFile(new URL("../backend/resources/THIRD_PARTY_NOTICES.json", import.meta.url), "utf8");
+  const notices = JSON.parse(encodedNotices);
+  const originalRfd = await readFile(new URL("../backend/tests/fixtures/notices/rfd-0.16.1-LICENSE", import.meta.url));
+  assert.ok(Buffer.from(notices).includes(originalRfd), "decoded notices retain independent original RFD bytes");
+  assert.ok((await readFile(executable)).includes(Buffer.from(encodedNotices)), "final artifact embeds complete escaped third-party notices");
   const temporary = await mkdtemp(join(tmpdir(), "teamarness-cli-smoke-"));
   try {
     const copy = join(temporary, "tmx");
@@ -31,10 +36,12 @@ export async function smokeCli(executable, version) {
       assert.match(help, /--for <duration> \| --until-cancelled/);
       assert.match(help, /counts values only, not heartbeats/);
       assert.match(help, /No automatic retries or reconnects/);
+      assert.equal(invoke(path, [...prefix, "--licenses"]), `${notices}\n`);
+      assert.match(help, /--licenses/);
       assert.equal(invoke(path, [...prefix, "--version"]), `tmx ${version} (CLI 1)\n`);
       assert.equal(invoke(path, [...prefix, "--help"]), help);
     }
-    console.log("Final embedded portable skill and native CLI modes: offline help/version, explicit and basename tmx passed.");
+    console.log("Final embedded portable skill and native CLI modes: offline help/version/licenses, explicit and basename tmx passed.");
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

@@ -19,7 +19,7 @@ fn help_and_version_are_offline() {
     assert!(version.status.success());
     assert_eq!(
         String::from_utf8(version.stdout).unwrap(),
-        "tmx 1.0.0 (CLI 1)\n"
+        "tmx 1.1.0 (CLI 1)\n"
     );
 }
 #[path = "support/cli_support.rs"]
@@ -152,7 +152,7 @@ fn native_entry_modes_never_fall_back_to_host_stdio() {
     let exe = env!("CARGO_BIN_EXE_teamarness-generated-package-backend");
     for args in [
         vec!["bad"],
-        vec!["--tmx-picker"],
+        vec!["--tmx-picker", "extra"],
         vec!["--tmx-cli", "subscribe"],
         vec!["--tmx-cli", "--workspace"],
     ] {
@@ -160,6 +160,13 @@ fn native_entry_modes_never_fall_back_to_host_stdio() {
         assert_eq!(out.status.code(), Some(2));
         assert!(out.stdout.starts_with(b"{\"error\":"));
     }
+    let helper = Command::new(exe).arg("--tmx-picker").output().unwrap();
+    assert_eq!(helper.status.code(), Some(2));
+    assert_eq!(
+        helper.stdout,
+        b"{\"code\":\"picker_request_invalid\",\"outcome\":\"error\",\"version\":1}\n"
+    );
+    assert!(helper.stderr.is_empty());
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("tmx");
     std::fs::copy(exe, &copy).unwrap();
@@ -279,4 +286,91 @@ async fn manifest_version_is_shared_with_cli_and_sdk_initialization() {
         String::from_utf8(output.stdout).unwrap(),
         format!("tmx {version} (CLI 1)\n")
     );
+}
+
+#[test]
+fn licenses_are_offline_embedded_and_reject_other_arguments() {
+    let exe = env!("CARGO_BIN_EXE_teamarness-generated-package-backend");
+    let output = Command::new(exe)
+        .args(["--tmx-cli", "--licenses"])
+        .env_clear()
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert!(output.stdout.starts_with(b"Third-party notices"));
+    use sha2::{Digest, Sha256};
+    let original = &output.stdout[..output.stdout.len() - 1]; // CLI's one framing newline is not notice data.
+    let hash = Sha256::digest(original)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    assert_eq!(
+        hash,
+        "ec776f9c33537ea40c5049518ba03cd7ded30ed836863a59fb2a856d959e9af3"
+    );
+    // Independent original registry notice, not an expectation decoded by the CLI.
+    let rfd = include_bytes!("fixtures/notices/rfd-0.16.1-LICENSE");
+    assert!(output.stdout.windows(rfd.len()).any(|b| b == rfd));
+    // Original CRLF and trailing-space notices survive source escaping byte-for-byte.
+    assert!(
+        output
+            .stdout
+            .windows(b"                              Apache License\r\n".len())
+            .any(|b| b == b"                              Apache License\r\n")
+    );
+    assert!(
+        output
+            .stdout
+            .windows(b"SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. \n".len())
+            .any(|b| b == b"SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. \n")
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    for required in [
+        "rfd 0.16.1",
+        "objc2 0.6.5",
+        "rustix 1.1.4",
+        "Copyright (c) 2022 Bartłomiej Maryńczak",
+        "LLVM Exceptions to the Apache 2.0 License",
+        "frameworks-0.3.2",
+        "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+    ] {
+        assert!(text.contains(required), "{required}");
+    }
+    for extra in ["--workspace", "workspaces", "--version"] {
+        assert_eq!(
+            Command::new(exe)
+                .args(["--tmx-cli", "--licenses", extra])
+                .output()
+                .unwrap()
+                .status
+                .code(),
+            Some(2)
+        );
+    }
+}
+
+#[test]
+fn embedded_literal_notice_checksums_are_intact() {
+    use sha2::{Digest, Sha256};
+    let texts = teamarness_generated_package_backend::cli::third_party_notices();
+    let mut count = 0;
+    for section in texts.split("\n===== SHA-256 ").skip(1) {
+        let (expected, literal) = section.split_once(" =====\n").unwrap();
+        let hash = |s: &str| {
+            Sha256::digest(s.as_bytes())
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        };
+        assert!(
+            hash(literal) == expected
+                || literal
+                    .strip_suffix('\n')
+                    .is_some_and(|s| hash(s) == expected),
+            "{expected}"
+        );
+        count += 1;
+    }
+    assert_eq!(count, 82);
 }

@@ -20,6 +20,11 @@ use std::{
     },
 };
 pub const CLI_MAJOR: u16 = 1;
+pub const THIRD_PARTY_NOTICES_JSON: &str = include_str!("../../resources/THIRD_PARTY_NOTICES.json");
+/// JSON escaping preserves literal upstream CRLF/trailing spaces without source whitespace exemptions.
+pub fn third_party_notices() -> String {
+    serde_json::from_str(THIRD_PARTY_NOTICES_JSON).expect("embedded literal notices")
+}
 pub struct Outcome {
     pub bytes: Vec<u8>,
     pub exit: u8,
@@ -163,6 +168,9 @@ pub fn run(arguments: Vec<String>, injected_home: Option<PathBuf>) -> u8 {
         Command::Help => {
             return emit(success(args::HELP.as_bytes().to_vec()));
         }
+        Command::Licenses => {
+            return emit(success(third_party_notices().into_bytes()));
+        }
         Command::Version => {
             return emit(success(
                 format!("tmx {} (CLI {CLI_MAJOR})", crate::PACKAGE_VERSION).into_bytes(),
@@ -297,16 +305,11 @@ pub fn entry(arguments: Vec<std::ffi::OsString>) -> std::process::ExitCode {
         };
         return run(args, None).into();
     }
+    if args.len() == 1 && args[0] == "--tmx-picker" {
+        return crate::picker_helper::entry().into();
+    }
     if !args.is_empty() {
-        return emit(
-            Failure::usage(if args.len() == 1 && args[0] == "--tmx-picker" {
-                "cli.picker_unavailable"
-            } else {
-                "cli.invalid_arguments"
-            })
-            .into(),
-        )
-        .into();
+        return emit(Failure::usage("cli.invalid_arguments").into()).into();
     }
     match tokio::runtime::Builder::new_multi_thread()
         .enable_all()

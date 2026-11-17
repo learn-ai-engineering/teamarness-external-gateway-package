@@ -72,6 +72,21 @@ impl BackendEnvironment {
         self.source = Some((source, admitted));
         self
     }
+    pub(crate) fn executable(
+        &self,
+        init: &Initialization,
+    ) -> Result<(
+        PathBuf,
+        std::result::Result<Admitted, install::InstallError>,
+    )> {
+        Ok(match &self.source {
+            Some((p, a)) => (p.clone(), Ok(a.clone())),
+            None => (
+                std::env::current_exe().map_err(|_| error("reload_required"))?,
+                Admitted::from_initialization(init),
+            ),
+        })
+    }
     async fn resolve_home(&self) -> Result<PathBuf> {
         match &self.home {
             Some(p) => Ok(p.clone()),
@@ -134,6 +149,7 @@ pub struct Apply {
 }
 #[derive(Clone)]
 struct Plan {
+    selection_id: Option<String>,
     id: String,
     operation: String,
     expires: u64,
@@ -301,13 +317,7 @@ impl SetupCoordinator {
         environment: BackendEnvironment,
     ) -> Result<Arc<Self>> {
         let home = environment.resolve_home().await?;
-        let (source, admitted) = match &environment.source {
-            Some((p, a)) => (p.clone(), Ok(a.clone())),
-            None => (
-                std::env::current_exe().map_err(|_| error("reload_required"))?,
-                Admitted::from_initialization(init),
-            ),
-        };
+        let (source, admitted) = environment.executable(init)?;
         let key = crate::catalog::digest(
             format!(
                 "{}\0{}\0{}",
@@ -520,11 +530,9 @@ impl SetupCoordinator {
         Ok(id)
     }
     pub fn invalidate_selection(&self, id: &str) {
-        self.memory
-            .lock()
-            .expect("setup memory")
-            .selections
-            .remove(id);
+        let mut m = self.memory.lock().expect("setup memory");
+        m.selections.remove(id);
+        m.plans.retain(|p| p.selection_id.as_deref() != Some(id));
     }
     pub async fn preview(self: &Arc<Self>, request: Preview) -> Result<Value> {
         if self.stopped.load(Ordering::SeqCst) {
@@ -562,7 +570,7 @@ impl SetupCoordinator {
         }
         let snapshot = self.policy.setup_snapshot().await?;
         let this = self.clone();
-        let plan =
+        let mut plan =
             tokio::task::spawn_blocking(move || this.make_plan(request.intent, selected, snapshot))
                 .await
                 .map_err(|_| error("setup_storage_failed"))??;
@@ -571,6 +579,15 @@ impl SetupCoordinator {
         if m.admission || m.plans.len() >= 4 {
             return Err(error("busy"));
         }
+        if self.stopped.load(Ordering::SeqCst)
+            || request
+                .selection_id
+                .as_ref()
+                .is_some_and(|id| !m.selections.contains_key(id))
+        {
+            return Err(error("selection_invalid"));
+        }
+        plan.selection_id = request.selection_id;
         m.plans.push(plan);
         Ok(result)
     }
@@ -682,6 +699,7 @@ impl SetupCoordinator {
             .map(|j| j.operation.clone())
             .unwrap_or_else(|| id.clone());
         Ok(Plan {
+            selection_id: None,
             id,
             operation,
             expires: self.environment.clock.seconds() + TEN_MINUTES,
@@ -788,6 +806,15 @@ impl SetupCoordinator {
         }
         {
             let mut m = self.memory.lock().expect("setup memory");
+            if self.stopped.load(Ordering::SeqCst)
+                || plan
+                    .selection_id
+                    .as_ref()
+                    .is_some_and(|id| !m.selections.contains_key(id))
+            {
+                let _ = send.send(Err(error("setup_preview_stale")));
+                return Ok(());
+            }
             m.accepted = Some((plan.id.clone(), plan.operation.clone()));
             m.plans.clear();
         }

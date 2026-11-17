@@ -997,6 +997,54 @@
       "event": {
         "$ref": "#/$defs/SetupStatus"
       }
+    },
+    "external-gateway.setup.choose-skill-folder": {
+      "request": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "event": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "outcome": {
+                "const": "selected"
+              },
+              "selectionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              }
+            },
+            "required": [
+              "outcome",
+              "selectionId",
+              "path"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "outcome": {
+                "const": "cancelled"
+              }
+            },
+            "required": [
+              "outcome"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
     }
   }
 }
