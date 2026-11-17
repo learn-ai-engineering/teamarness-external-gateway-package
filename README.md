@@ -6,6 +6,8 @@ A standalone Personal Package for explicitly selected, Person-authorized Workspa
 
 The Backend implements typed configuration/status, shared exact-tool policy, verifier-only tokens and bounded authenticated IPv4 HTTP. Main and standard settings views provide Workspace status, exact Package/tool selection, independent token controls and secret-free external-agent onboarding. The generic HTTP client is automated against the SDK capability seam; real-Host qualification and Don-owned native/external-agent observations remain pending. No real-Host or manual pass is claimed.
 
+Native ordinary CLI access is also embedded in the same executable; see [CLI usage and client custody](docs/cli.md). Managed installation/setup and CLI observations are not implemented in this phase.
+
 ## Build and check
 
 Use Rust 1.99.1 and Node 24.20.0 from this standalone project:
@@ -39,7 +41,7 @@ All Rust/npm direct versions are exact. Cargo/npm lockfiles belong to this proje
 
 ## Security boundary
 
-Configuration uses private owned files, bounded serialized writes and durable replacement. Only domain-separated SHA-256 token verifiers are stored. A bearer appears only in a successful create/regenerate response. Lost responses require regeneration. Do not store bearer values, private profiles or model credentials in this repository or evidence.
+Configuration uses private owned files, bounded serialized writes and durable replacement. The server stores only domain-separated SHA-256 token verifiers. Manual create/regenerate returns a one-time bearer; lost responses require regeneration. The separate machine-local ClientStore format 1 intentionally stores client bearer material in private owned files under the effective OS user’s home, outside the Package Data Directory. These are plaintext OS-user credentials, not encrypted or hostile-same-user protected. App-led publication arrives in a later phase. Do not store bearer values, private profiles or model credentials in this repository or evidence.
 
 Native Packages run as the current OS user. This is not a sandbox or protection against hostile same-user native code. Local commits and builds do not establish installation, publication or manual usability.
 

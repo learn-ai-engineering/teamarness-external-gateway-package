@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -56,6 +56,9 @@ test("assembles exact final Package bytes, declarations, paths, and modes", asyn
     const output = await assemblePackage({ projectRoot: root, env });
     assert.equal(output, join(root, "dist", identity));
 
+    assert.deepEqual((await readdir(output)).sort(), ["backend", "teamarness.package.json", "ui"]);
+    assert.deepEqual(await readdir(join(output, "backend")), ["teamarness-generated-package-backend-aarch64-apple-darwin"]);
+    assert.deepEqual((await readdir(join(output, "ui"))).sort(), ["contract.json", "index.js"]);
     const manifestBytes = await readFile(join(output, "teamarness.package.json"));
     const manifest = JSON.parse(manifestBytes);
     const ui = await readFile(join(output, manifest.ui.entrypoint.path));

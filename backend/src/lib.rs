@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 //! Standalone Person-authorized exact-tool policy and bounded loopback HTTP.
+pub const PACKAGE_VERSION: &str = env!("TEAMARNESS_PACKAGE_VERSION");
 pub mod catalog;
+pub mod cli;
+pub mod client_store;
 pub mod config;
 pub mod http;
 pub mod limits;
