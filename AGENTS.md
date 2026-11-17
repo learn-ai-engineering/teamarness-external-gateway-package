@@ -241,4 +241,22 @@ Corrected full-access Phase 2 refreshes the four canonical vendor trees once fro
 
 `streams.rs` owns eight pending/active subscriptions separately from twelve calls. Confirmed SDK methods precede HTTP 200/ready. Legacy/unconfirmed setup refuses clearly, never fabricates ready. Policy owns token-generation/exact-tool registration and every output admission. Idle permission/lifecycle loss signals streams before drain; failed storage closes all. Pending observer loss retains capacity through SDK terminal and late success closes. Use recv_with_credit with one waiting frame plus one writer-owned frame, 256 KiB original values plus 4 KiB framing, five-second pending-write flush and 15-second heartbeat. No owner is held over socket/credit/cleanup waits; no detached handles, durable replay, automatic reconnect or model wakeup. Already-admitted bounded bytes may drain. Provider Markdown stays unchanged; structured runtime.guide remains callable. Native Epic/Collection prerequisites and Provider versions/conflicts stay Provider-owned. Final real-Host qualification and Don-owned corrected-plan M1–M4 remain pending.
 
-`cli/` owns interaction major 1, raw-byte JSON/NDJSON and numeric-loopback Hyper client access. `cli/stream.rs` serializes one observation, validated ready and terminal selection; descriptor-level nonblocking stdout has one bounded pending line, a five-second write budget and no detached writer. Subscriptions require readiness-registered pipe/terminal stdout; regular/non-pollable output refuses before network (exit 2, stderr JSON/hint), never silently falling back to blocking disk I/O. Continuous mode has no CLI lifetime cap; the 45-second valid-frame liveness clock pauses under local output backpressure. `client_store.rs` owns private format-1 connection files, origin conflicts and cross-process publication. Production home lookup uses bounded fixed macOS dscacheutil, never HOME or a public path flag; tests inject physical homes through constructors or the unassembled fixture example. CLI help/version do not resolve home, start Host stdio, listener or AppKit. Managed setup remains a later phase. `backend/build.rs` embeds the Package manifest version; Cargo crate version, CLI major and store format are independent.
+`cli/` owns interaction major 1, raw-byte JSON/NDJSON and numeric-loopback Hyper client access. `cli/stream.rs` serializes one observation, validated ready and terminal selection; descriptor-level nonblocking stdout has one bounded pending line, a five-second write budget and no detached writer. Subscriptions require readiness-registered pipe/terminal stdout; regular/non-pollable output refuses before network (exit 2, stderr JSON/hint), never silently falling back to blocking disk I/O. Continuous mode has no CLI lifetime cap; the 45-second valid-frame liveness clock pauses under local output backpressure. `client_store.rs` owns private format-1 connection files, origin conflicts and cross-process publication. Production home lookup uses bounded fixed macOS dscacheutil, never HOME or a public path flag; tests inject physical homes through constructors or the unassembled fixture example. CLI help/version do not resolve home, start Host stdio, listener or AppKit. Managed access coordination remains a later phase. `backend/build.rs` embeds the Package manifest version; Cargo crate version, CLI major and store format are independent.
+
+
+`managed_install.rs` owns recognized executable/skill publication safety shared by
+`skill_install.rs`, not authorization. Preview is read-only; callers run apply and
+recovery as owned blocking work. Supplied provenance comes from the current Host
+Initialization (never a filesystem manifest). Automatic-refresh API admits only
+intact same-owner strictly-newer compatible bytes; equal bytes/version is a no-op,
+and transfer/same-version change/downgrade needs explicit preview. Unrecognized or
+modified outputs and future/invalid receipts never become repair authority.
+Private bounded old/new journals plus the shared nonwaiting OS installer lock
+reconcile partial receipts; never promote temporary bytes or claim rollback.
+`backend/resources/teamarness/SKILL.md` is embedded portable live guidance with one
+literal absolute quoted command, no bearer/default/store path/Provider schema.
+Selected folder identities are revalidated; no registry or previous-folder scan.
+A pre-journal death can leave a private random staging orphan; retry never adopts
+or reclaims it. Phase 4 must add the injected Backend-home seam and wire actual
+activation/reload refresh and coordinator consent; Phase 3 only tests these
+module interfaces. No automated test may resolve/install into the ordinary home.

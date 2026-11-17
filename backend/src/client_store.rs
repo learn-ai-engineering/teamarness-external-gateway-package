@@ -215,6 +215,9 @@ impl ClientStore {
                     return Err(StorageError::Capacity);
                 }
                 records.push(Self::read_record(dir, name)?);
+            } else if name == "managed" {
+                let managed: File = io(sys::openat(dir, name, DIR, Mode::empty()))?.into();
+                stat(&managed, true, true)?;
             } else if ![".", "..", "store.lock", "record.tmp"].contains(&name) {
                 return Err(StorageError::Invalid);
             }

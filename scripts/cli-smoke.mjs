@@ -1,11 +1,13 @@
 // Offline final-artifact proof only. Never performs setup or resolves the user's client home.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFile, chmod, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, chmod, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export async function smokeCli(executable, version) {
+  const template = await readFile(new URL("../backend/resources/teamarness/SKILL.md", import.meta.url));
+  assert.ok((await readFile(executable)).includes(template), "final native artifact embeds the complete portable skill");
   const temporary = await mkdtemp(join(tmpdir(), "teamarness-cli-smoke-"));
   try {
     const copy = join(temporary, "tmx");
@@ -32,7 +34,7 @@ export async function smokeCli(executable, version) {
       assert.equal(invoke(path, [...prefix, "--version"]), `tmx ${version} (CLI 1)\n`);
       assert.equal(invoke(path, [...prefix, "--help"]), help);
     }
-    console.log("Final native CLI modes: offline help/version, explicit and basename tmx passed.");
+    console.log("Final embedded portable skill and native CLI modes: offline help/version, explicit and basename tmx passed.");
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

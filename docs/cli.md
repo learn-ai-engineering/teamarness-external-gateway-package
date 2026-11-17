@@ -2,9 +2,9 @@
 
 The single Apple Silicon macOS Backend artifact also provides native `tmx` mode.
 No Node, npm, source checkout or interpreter is needed at runtime. This phase
-provides ordinary operations and live subscriptions. Managed command installation,
-app-led setup, portable skill publication and native folder selection arrive
-in later phases. No installed-access qualification is claimed.
+provides ordinary operations, live subscriptions and tested managed command/skill
+publication modules. App-led setup, activation refresh wiring and native folder
+selection arrive later. No installed-access qualification is claimed.
 
 From an assembled Package Directory, use its absolute Backend executable path
 with `--tmx-cli --help` or `--tmx-cli --version`. A copy named `tmx` selects CLI
@@ -159,7 +159,7 @@ five seconds and closes its socket; it cannot guarantee the writer's disk I/O.
 The server still persists **verifiers only** under its supplied Package Data
 Directory (configVersion 1). ClientStore format 1 intentionally persists bearer
 credentials in owned private OS-user files at
-`~/.local/share/teamarness/external-gateway/`. The future managed command path is
+`~/.local/share/teamarness/external-gateway/`. The fixed managed command path is
 `~/.local/bin/tmx`; PATH setup is optional and shell startup files are not edited.
 The portable skill must not include this private store path or credentials.
 
@@ -202,3 +202,55 @@ production home resolution or an acquired installed artifact. Later Backend
 setup fixtures must inject the same isolation, not just the CLI. Real installed
 qualification uses a disposable OS account/home; never exercise setup in Don's
 ordinary `~/.local` state. Manual M1–M5 remain Don-owned and pending.
+
+## Recognized command and selected skill publication
+
+The Backend-owned `managed_install` / `skill_install` interfaces prepare read-only
+previews and publish outputs without creating credentials, granting tools,
+enabling a listener or changing Policy. Initial command installation requires
+explicit consent. An automatic refresh is accepted only for an intact recognized
+copy, same owning Installation, strictly newer Package version precedence, and
+compatible CLI/store majors. Equal version/equal bytes is a no-op. Ownership
+transfer, downgrade and same-version changed bytes require a new explicit preview.
+Changed or unrelated executable bytes, missing/invalid/future receipts and unsafe
+paths refuse even explicit repair. Do not delete a receipt to force replacement;
+resolve a collision outside setup. Existing processes retain their executable
+image; subsequent invocations use the new copy. The Package version is separate
+from CLI interaction major 1 and client-store format 1.
+
+Only complete bytes matching this running generation's admitted Host digest may
+be copied or used for a helper. A source mismatch requires Package reload, not
+trust in a manifest at that path. The installer uses a nonwaiting cross-process
+OS lock, private exclusive copy, copied-byte rehash, executable mode 0755,
+file sync, rename and directory sync. Its private bounded receipt records Package
+identity/version/admitted digest, installed digest, owner and compatible majors.
+A bounded secret-free old/new journal makes executable and receipt publication
+recoverable rather than pretending they are one atomic transaction. Recovery
+completes a matching already-published new output or reports explicit repair;
+it never promotes temporary bytes or adopts arbitrary output. Failed sync can
+leave effects visible: it is not a rollback guarantee.
+
+A selected physical folder receives only `teamarness/SKILL.md` and its secret-free
+receipt (owned 0600 files; new directory 0700). The portable resource is embedded
+in the executable and substitutes one safely quoted absolute command path,
+including spaces/apostrophes. It contains no credential, default Workspace,
+private-store path or copied Provider contract. Preview pins the exact canonical
+path and existing ancestor/destination identities; apply revalidates them.
+Unrelated directories/files, edited skills, symlinks, hardlinks, writable
+redirection and unsupported encodings refuse. New skill directories are staged
+privately and published with no-replace rename. Existing recognized skills use
+exact old/new digest recovery. Publication never runs a shell.
+
+Selected destinations exist only in a live plan or an unfinished private journal.
+There is no folder registry, scanning or automatic hunt for previous skills;
+reselect a folder to update it. A crash before a new skill's journal becomes
+durable may leave an empty random private staging directory in the selected
+parent. A retry uses fresh exclusive entropy-named staging, never adopting,
+scanning or reclaiming that unrecognized orphan. It may require deliberate
+external cleanup after inspection; no false rollback/cleanup claim is made.
+A command can be published while skill publication fails; no access was authorized.
+
+These are module-level capabilities in this phase. The later setup coordinator
+will supply consent and wire activation/reload refresh through an injected-home
+Backend seam. Tests never invoke setup against the ordinary OS home. Acquired
+native output execution/update and real harness skill discovery remain M1/M3/M4.

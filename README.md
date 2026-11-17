@@ -6,7 +6,7 @@ A standalone Personal Package for explicitly selected, Person-authorized Workspa
 
 The Backend implements typed configuration/status, shared exact-tool policy, verifier-only tokens and bounded authenticated IPv4 HTTP. Main and standard settings views provide Workspace status, exact Package/tool selection, independent token controls and secret-free external-agent onboarding. The generic HTTP client is automated against the SDK capability seam; real-Host qualification and Don-owned native/external-agent observations remain pending. No real-Host or manual pass is claimed.
 
-Native ordinary/streaming CLI access is also embedded in the same executable; see [CLI usage and client custody](docs/cli.md). Managed installation/setup is not implemented in this phase.
+Native ordinary/streaming CLI access is also embedded in the same executable; see [CLI usage and client custody](docs/cli.md). Recognized managed command/skill preview, publication and recovery modules are now implemented and filesystem-tested. App-led setup, activation refresh wiring and native selection are not active yet; this is not an installed-access qualification.
 
 ## Build and check
 

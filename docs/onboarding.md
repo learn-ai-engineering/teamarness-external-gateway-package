@@ -35,3 +35,18 @@ There are 12 outstanding gateway SDK operations, including guides, with nonwaiti
 The Person controls listener state, exact Package/tool choices and independently revocable tokens in Package settings. New tools stay off. Setup and tokens survive restart/reinstall at the saved port. Use Disable and revoke all tokens before removal if retained access is unwanted. A port conflict stops the listener without silently choosing a new URL; obtain the explicitly changed URL from the Person.
 
 Canonical membership loss also stops the listener, including manifest, onboarding and cached schemas; old connections retire within five seconds after stop begins. Saved setup remains, but a removed identity stays stopped across restart/reload/reinstall. Membership-monitoring failure closes access with an unavailable status. Only a fresh valid membership observation may restore eligibility; a terminated monitoring stream needs explicit Package recovery/reload. Neither recovery nor notifications override manual suspension or desired-disabled state. Ask the Person to inspect status rather than repeatedly reconnecting. Already-delivered data cannot be retracted, and already-authorized calls may finish internally without a delivered response.
+
+
+## Native CLI and portable guidance
+
+The native CLI supports explicit Workspace selection, live contract/schema/guide
+discovery, calls and confirmed observations; see the Package's CLI documentation.
+The embedded portable skill uses a safely quoted absolute command, not raw HTTP
+or copied Provider contracts. Managed command/selected-skill publication modules
+do not by themselves authorize access; app-led setup is a separate operation.
+Only recognized unmodified outputs may be refreshed. Edited/unrelated output is
+a collision to resolve outside setup, never an overwrite prompt. Skill discovery
+and observation lifetime depend on the actual external harness; no universal
+model wakeup or automatic reconnection is promised. For recording streams, use a
+pollable pipe to an external `tee` writer with `set -o pipefail`, not direct
+regular-file stdout redirection. Reconcile gaps through live Provider guidance.
