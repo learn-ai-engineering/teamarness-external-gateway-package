@@ -188,3 +188,68 @@ fn unique_keys(raw: &RawValue) -> bool {
         _ => true,
     }
 }
+
+/// CLI-only descriptor I/O. Never use Tokio stdout's uncancellable blocking worker.
+/// O_NONBLOCK is shared with dup's original descriptor and restored on drop.
+pub struct NonblockingStdout {
+    fd: tokio::io::unix::AsyncFd<std::os::fd::OwnedFd>,
+    flags: rustix::fs::OFlags,
+}
+impl NonblockingStdout {
+    pub fn new() -> std::io::Result<Self> {
+        use std::io::IsTerminal;
+        let fd = rustix::io::dup(std::io::stdout())?;
+        let kind = rustix::fs::FileType::from_raw_mode(rustix::fs::fstat(&fd)?.st_mode);
+        // O_NONBLOCK does not bound regular-file writes on macOS. Subscriptions
+        // require a real pipe or terminal and successful readiness registration.
+        if kind != rustix::fs::FileType::Fifo && !std::io::stdout().is_terminal() {
+            return Err(std::io::ErrorKind::Unsupported.into());
+        }
+        let flags = rustix::fs::fcntl_getfl(&fd)?;
+        rustix::fs::fcntl_setfl(&fd, flags | rustix::fs::OFlags::NONBLOCK)?;
+        match tokio::io::unix::AsyncFd::new(fd) {
+            Ok(fd) => Ok(Self { fd, flags }),
+            Err(e) => {
+                // dup shares the original stdout's open-file flags.
+                let _ = rustix::fs::fcntl_setfl(std::io::stdout(), flags);
+                Err(e)
+            }
+        }
+    }
+}
+impl Drop for NonblockingStdout {
+    fn drop(&mut self) {
+        let _ = rustix::fs::fcntl_setfl(self.fd.get_ref(), self.flags);
+    }
+}
+impl tokio::io::AsyncWrite for NonblockingStdout {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        bytes: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        use std::task::{Poll, ready};
+        loop {
+            let mut ready = ready!(self.fd.poll_write_ready(cx))?;
+            match ready.try_io(|fd| {
+                rustix::io::write(fd.get_ref(), &bytes[..bytes.len().min(16384)])
+                    .map_err(Into::into)
+            }) {
+                Ok(result) => return Poll::Ready(result),
+                Err(_would_block) => continue,
+            }
+        }
+    }
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+}

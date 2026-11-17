@@ -2,8 +2,8 @@
 
 The single Apple Silicon macOS Backend artifact also provides native `tmx` mode.
 No Node, npm, source checkout or interpreter is needed at runtime. This phase
-provides ordinary operations only: managed command installation, app-led setup,
-portable skill publication, native folder selection and CLI subscriptions arrive
+provides ordinary operations and live subscriptions. Managed command installation,
+app-led setup, portable skill publication and native folder selection arrive
 in later phases. No installed-access qualification is claimed.
 
 From an assembled Package Directory, use its absolute Backend executable path
@@ -20,6 +20,8 @@ tmx --workspace <id-or-exact-unique-name> schema <contract> --major <number>
 tmx --workspace <id-or-exact-unique-name> guide <contract> --major <number>
 tmx --workspace <id-or-exact-unique-name> call <contract> <port> --major <number> --json '{}'
 tmx --workspace <id-or-exact-unique-name> call <contract> <port> --major <number> --input <file|->
+tmx --workspace <id-or-exact-unique-name> subscribe <contract> <port> --major <number> --json null --until-cancelled
+tmx --workspace <id-or-exact-unique-name> subscribe <contract> <port> --major <number> --input <file|-> --for 2m [--max-events 10]
 ```
 
 Help/version are offline. `workspaces` lists only locally configured connections,
@@ -43,7 +45,7 @@ Continue with every `nextCursor`, including after an empty page, until null.
 Provider result pagination, workflows, conflicts and opaque Version Tokens stay
 Provider-owned; the CLI never invents a generic transaction model.
 
-Exactly one JSON source is required for `call`. Stdin is read only for explicit
+Exactly one JSON source is required for `call` and `subscribe`. Stdin is read only for explicit
 `--input -`; no interactive prompt or implicit read exists. Input is bounded to
 256 KiB, one JSON value, depth 64, with duplicate object keys refused. Original
 number spelling and bytes survive call-envelope construction and ordinary JSON
@@ -80,6 +82,77 @@ write and 35-second response budgets per request, 16-KiB/64-field headers,
 response budgets respectively are 256 KiB, 1 MiB and 32 KiB plus 4 KiB framing.
 The call result value independently stays within 256 KiB. Invalid framing,
 encodings, content types, redirects and depth over 64 refuse without replay.
+
+## Live observations
+
+`subscribe` supports event and streaming-query Ports, with the same exact
+Workspace, contract, major, Port and explicit JSON input as calls. Use `null`
+for events or the streaming query's request according to its live schema.
+Exactly one of `--for <duration>` or `--until-cancelled` is required. There is no
+implicit duration. Durations are positive integers with `ms`, `s`, `m` or `h`;
+arithmetic exceeding a u64 nanosecond duration or the monotonic clock is refused.
+Optional `--max-events` is a positive integer through 4,294,967,295, alongside
+either lifetime mode. Duplicate, conflicting and overflowing flags refuse before
+connecting. Only `value` frames count, never heartbeats or other control frames.
+
+The 35-second opening budget includes validated ready. Ready must appear once,
+match the selected contract/major/Port and declare query/event plus stream.
+The duration starts when that ready is accepted, not on process launch. Original
+bounded gateway NDJSON lines (`ready`, `value`, `heartbeat`, `end`) pass through
+unchanged, including primitive values, large integers, decimal spelling and
+whitespace. There is one owned observation, no reconnect or stream collection.
+
+| Cause | Terminal | Exit |
+| --- | --- | --- |
+| Gateway completed/error | Original `end` | 0/1 |
+| Requested duration | `{"type":"client_end","reason":"duration_limit"}` | 0 |
+| Requested value count | `{"type":"client_end","reason":"event_limit"}` | 0 |
+| SIGINT after ready | Best-effort `client_end`, reason `cancelled` | 130 |
+| EOF, invalid frames/order, stalled transport after ready | `client_error` with `cli.stream_interrupted` | 1 |
+
+Before ready, refusals/cancellation/transport errors are ordinary JSON, never a
+fabricated ready or client stream terminal. The `client_error` contains the
+ordinary error fields (`source:cli`, `retryable:false`, `outcomeUncertain:false`,
+empty `details`). That flag is about command outcome, **not complete event
+delivery**: an interruption signals a gap requiring Provider-guided reconciliation.
+
+An already accepted gateway end wins. Otherwise cancellation precedes expired
+duration, and both precede accepting another frame. The count-reaching value is
+drained before its event-limit terminal; no next frame is accepted. A partially
+written line is drained within its remaining output budget before any local
+terminal, never spliced into another JSON line. A failed terminal write is exit
+1, not successful observation. No two terminals are emitted.
+
+Each line is at most 256 KiB plus 4 KiB including its newline; its value itself
+is at most 256 KiB and whole-frame depth is at most 64. There is one pending line
+and a bounded transport read buffer, not a producer queue. Descriptor-level
+nonblocking, readiness-registered stdout has a five-second budget for each pending write. A stalled or
+broken output closes the socket and exits nonzero, with **no further stdout
+attempt**. SIGKILL or a broken pipe can prevent the final line entirely.
+
+After ready, 45 seconds without a valid frame is a transport interruption, not
+a total lifetime. Partial bytes do not reset it. Local output backpressure
+suspends this liveness clock, but not a requested duration. Continuous mode has
+no CLI lifetime cap. Gateway 15-second heartbeats remain in output and must not
+be treated as domain events. An external harness may impose its own lifetime;
+there is no daemon, model wakeup, durable replay or universal session cleanup.
+Explicitly reconnect and reconcile with current Provider guidance after a gap.
+
+Subscriptions require stdout to be a pollable pipe or terminal. Direct redirection
+such as `> events.ndjson` is unsupported: macOS regular-file writes cannot honor
+O_NONBLOCK and the mandatory pending-write bound. This refuses **before network**
+with exit 2, `cli.stream_stdout_unsupported` JSON and a hint on stderr; unsupported
+stdout itself is never written. Ordinary command output is unchanged. To save a
+stream, let an external writer own the file, for example in zsh/bash:
+
+```sh
+set -o pipefail
+tmx --workspace Acme subscribe dev.example.provider changes --major 1 --json null --until-cancelled | tee events.ndjson
+```
+
+`pipefail` prevents a successful `tee` exit from hiding a failed CLI observation.
+If the external writer stalls, the CLI's pipe backpressure still times out in
+five seconds and closes its socket; it cannot guarantee the writer's disk I/O.
 
 ## Credential custody
 

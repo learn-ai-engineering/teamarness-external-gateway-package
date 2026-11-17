@@ -2,6 +2,7 @@
 pub mod args;
 pub mod home;
 pub mod output;
+pub mod stream;
 pub mod transport;
 use crate::{
     client_store::{ClientStore, ResolveError},
@@ -45,11 +46,26 @@ pub async fn execute(
     home: &Path,
     progress: Arc<AtomicBool>,
 ) -> Result<Outcome, Failure> {
-    let store =
-        ClientStore::for_home(home).map_err(|_| Failure::usage("cli.client_store_invalid"))?;
     if args.command == Command::Workspaces {
+        let store =
+            ClientStore::for_home(home).map_err(|_| Failure::usage("cli.client_store_invalid"))?;
         return Ok(success(serde_json::to_vec(&json!({"workspaces":store.summaries().map_err(|_|Failure::usage("cli.client_store_invalid"))?})).unwrap()));
     }
+    let connection = match preflight(&args, home).await? {
+        Ok(c) => c,
+        Err(outcome) => return Ok(outcome),
+    };
+    if args.command == Command::Status {
+        return Ok(success(serde_json::to_vec(&json!({"workspace":{"id":connection.workspace_id,"name":connection.workspace_name},"endpoint":format!("http://127.0.0.1:{}",connection.port),"reachable":true})).unwrap()));
+    }
+    execute_operation(args, connection, progress).await
+}
+async fn preflight(
+    args: &Args,
+    home: &Path,
+) -> Result<Result<crate::client_store::Connection, Outcome>, Failure> {
+    let store =
+        ClientStore::for_home(home).map_err(|_| Failure::usage("cli.client_store_invalid"))?;
     let connection = store
         .resolve(
             args.workspace
@@ -75,11 +91,11 @@ pub async fn execute(
     )
     .await?;
     if output::upstream_error(&preflight.bytes) {
-        return Ok(Outcome {
+        return Ok(Err(Outcome {
             bytes: preflight.bytes,
             exit: 1,
             hint: None,
-        });
+        }));
     }
     let manifest: serde_json::Value =
         serde_json::from_slice(&preflight.bytes).map_err(|_| Failure::transport(false))?;
@@ -101,9 +117,15 @@ pub async fn execute(
             .refresh_name(&connection, name)
             .map_err(|_| Failure::usage("cli.client_store_changed"))?;
     }
-    if args.command == Command::Status {
-        return Ok(success(serde_json::to_vec(&json!({"workspace":{"id":connection.workspace_id,"name":name},"endpoint":format!("http://127.0.0.1:{}",connection.port),"reachable":true})).unwrap()));
-    }
+    let mut connection = connection;
+    connection.workspace_name = name.into();
+    Ok(Ok(connection))
+}
+async fn execute_operation(
+    args: Args,
+    connection: crate::client_store::Connection,
+    progress: Arc<AtomicBool>,
+) -> Result<Outcome, Failure> {
     let call = args.command == Command::Call;
     let response = transport::request(
         connection.port,
@@ -155,6 +177,9 @@ pub fn run(arguments: Vec<String>, injected_home: Option<PathBuf>) -> u8 {
         Ok(r) => r,
         Err(_) => return emit(Failure::transport(false).into()),
     };
+    if parsed.command == Command::Subscribe {
+        return runtime.block_on(run_subscription(parsed, injected_home));
+    }
     let outcome=runtime.block_on(async {
         let progress=Arc::new(AtomicBool::new(false));
         let work=async {
@@ -168,6 +193,78 @@ pub fn run(arguments: Vec<String>, injected_home: Option<PathBuf>) -> u8 {
     });
     emit(outcome.unwrap_or_else(Into::into))
 }
+async fn run_subscription(parsed: Args, injected_home: Option<PathBuf>) -> u8 {
+    use tokio::io::AsyncWriteExt;
+    let mut out = match output::NonblockingStdout::new() {
+        Ok(out) => out,
+        Err(_) => {
+            let failure = Failure::usage("cli.stream_stdout_unsupported");
+            // Unsupported stdout itself may block: do not attempt to write it.
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "{}",
+                String::from_utf8_lossy(&failure.bytes())
+            );
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "Subscriptions require a pipe or terminal. Use a pipe to tee with shell pipefail to save output."
+            );
+            return 2;
+        }
+    };
+    let cancel = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    tokio::pin!(cancel);
+    let prepare = async {
+        let home = match injected_home {
+            Some(h) => h,
+            None => home::resolve().await?,
+        };
+        preflight(&parsed, &home).await
+    };
+    let prepared = tokio::select! { biased;
+        _ = &mut cancel => {
+            let mut e = Failure::transport(false);
+            e.exit = 130;
+            e.code = "cli.cancelled";
+            Err(e)
+        },
+        result = prepare => result,
+    };
+    let connection = match prepared {
+        Ok(Ok(c)) => c,
+        other => {
+            let mut outcome = match other {
+                Ok(Err(o)) => o,
+                Err(e) => e.into(),
+                _ => unreachable!(),
+            };
+            outcome.bytes.push(b'\n');
+            return if matches!(
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    out.write_all(&outcome.bytes)
+                )
+                .await,
+                Ok(Ok(()))
+            ) {
+                outcome.exit
+            } else {
+                1
+            };
+        }
+    };
+    stream::run(
+        &connection,
+        parsed.body,
+        parsed.observation.as_ref().expect("parsed subscription"),
+        &mut out,
+        &mut cancel,
+    )
+    .await
+}
+
 fn emit(mut outcome: Outcome) -> u8 {
     outcome.bytes.push(b'\n');
     if std::io::stdout().lock().write_all(&outcome.bytes).is_err() {

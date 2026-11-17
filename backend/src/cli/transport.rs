@@ -28,6 +28,9 @@ fn invalid() -> io::Error {
 }
 /// Inspect raw headers before Hyper can normalize duplicate lengths or conflicting framing.
 pub fn validate_headers(bytes: &[u8], limit: usize) -> io::Result<()> {
+    validate_response_headers(bytes, limit, false)
+}
+fn validate_response_headers(bytes: &[u8], limit: usize, stream: bool) -> io::Result<()> {
     if bytes.len() > MAX_HEADER_BYTES {
         return Err(invalid());
     }
@@ -46,6 +49,7 @@ pub fn validate_headers(bytes: &[u8], limit: usize) -> io::Result<()> {
     if !(200..300).contains(&code) && !(400..600).contains(&code) {
         return Err(invalid());
     }
+    let streaming = stream && code == 200;
     let (mut fields, mut length, mut transfer, mut content) = (0, None, false, false);
     for line in lines {
         if line.is_empty() {
@@ -66,7 +70,7 @@ pub fn validate_headers(bytes: &[u8], limit: usize) -> io::Result<()> {
                     return Err(invalid());
                 }
                 let n = value.parse::<usize>().map_err(|_| invalid())?;
-                if n > limit {
+                if !streaming && n > limit {
                     return Err(invalid());
                 }
                 length = Some(n);
@@ -78,7 +82,12 @@ pub fn validate_headers(bytes: &[u8], limit: usize) -> io::Result<()> {
                 transfer = true;
             }
             "content-type" => {
-                if content || !value.eq_ignore_ascii_case("application/json") {
+                let expected = if streaming {
+                    "application/x-ndjson"
+                } else {
+                    "application/json"
+                };
+                if content || !value.eq_ignore_ascii_case(expected) {
                     return Err(invalid());
                 }
                 content = true;
@@ -100,6 +109,7 @@ struct Wire<S> {
     offset: usize,
     checked: bool,
     limit: usize,
+    stream: bool,
 }
 impl<S: AsyncRead + Unpin> AsyncRead for Wire<S> {
     fn poll_read(
@@ -120,7 +130,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for Wire<S> {
             }
             self.header.extend_from_slice(buf.filled());
             if let Some(end) = self.header.windows(4).position(|b| b == b"\r\n\r\n") {
-                validate_headers(&self.header[..end + 4], self.limit)?;
+                validate_response_headers(&self.header[..end + 4], self.limit, self.stream)?;
                 self.checked = true;
             } else if self.header.len() > MAX_HEADER_BYTES {
                 return Poll::Ready(Err(invalid()));
@@ -131,6 +141,11 @@ impl<S: AsyncRead + Unpin> AsyncRead for Wire<S> {
             out.put_slice(&self.header[self.offset..self.offset + n]);
             self.offset += n;
             return Poll::Ready(Ok(()));
+        }
+        // Header bytes have been handed off; retain no second long-lived read buffer.
+        if !self.header.is_empty() {
+            self.header = vec![];
+            self.offset = 0;
         }
         Pin::new(&mut self.socket).poll_read(cx, out)
     }
@@ -196,6 +211,7 @@ pub async fn request(
         offset: 0,
         checked: false,
         limit,
+        stream: false,
     };
     let work = async {
         let (mut sender, connection) = hyper::client::conn::http1::Builder::new()
@@ -243,6 +259,124 @@ pub async fn request(
         .map_err(|_| fail())?
 }
 
+/// The connection future is polled by its body owner, never detached or reconnected.
+pub struct StreamResponse {
+    connection: hyper::client::conn::http1::Connection<TokioIo<Wire<TcpStream>>, Full<Bytes>>,
+    incoming: hyper::body::Incoming,
+    complete: bool,
+    chunk: Bytes,
+    line: Vec<u8>,
+    pub status: u16,
+}
+impl StreamResponse {
+    async fn chunk(&mut self) -> Result<Option<Bytes>, Failure> {
+        use hyper::body::Body;
+        std::future::poll_fn(|cx| {
+            if !self.complete && Pin::new(&mut self.connection).poll(cx).is_ready() {
+                self.complete = true;
+            }
+            Pin::new(&mut self.incoming).poll_frame(cx)
+        })
+        .await
+        .transpose()
+        .map_err(|_| Failure::transport(false))?
+        .map(|f| f.into_data().map_err(|_| Failure::transport(false)))
+        .transpose()
+    }
+    pub async fn refusal(&mut self) -> Result<Vec<u8>, Failure> {
+        let mut bytes = vec![];
+        while let Some(chunk) = self.chunk().await? {
+            if chunk.len()
+                > (PORT_VALUE_BYTES + ENVELOPE_ALLOWANCE_BYTES).saturating_sub(bytes.len())
+            {
+                return Err(Failure::transport(false));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        if !valid_json(&bytes) || !super::output::upstream_error(&bytes) {
+            return Err(Failure::transport(false));
+        }
+        Ok(bytes)
+    }
+    /// Cancellation-safe: a partial line stays in this single bounded read buffer.
+    pub async fn line(&mut self) -> Result<Vec<u8>, Failure> {
+        use bytes::Buf;
+        loop {
+            if self.chunk.is_empty() {
+                self.chunk = self
+                    .chunk()
+                    .await?
+                    .ok_or_else(|| Failure::transport(false))?;
+                continue;
+            }
+            let end = self.chunk.iter().position(|b| *b == b'\n');
+            let count = end.map_or(self.chunk.len(), |n| n + 1);
+            if count > (PORT_VALUE_BYTES + ENVELOPE_ALLOWANCE_BYTES).saturating_sub(self.line.len())
+            {
+                return Err(Failure::transport(false));
+            }
+            self.line.extend_from_slice(&self.chunk[..count]);
+            self.chunk.advance(count);
+            if end.is_some() {
+                return Ok(std::mem::take(&mut self.line));
+            }
+        }
+    }
+}
+pub async fn open_stream(
+    port: u16,
+    bearer: &str,
+    body: Vec<u8>,
+) -> Result<StreamResponse, Failure> {
+    let fail = || Failure::transport(false);
+    let socket = connect(TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)))
+        .await
+        .map_err(|_| fail())?
+        .map_err(|_| fail())?;
+    let wire = Wire {
+        socket,
+        sent: Arc::default(),
+        write_clock: None,
+        header: vec![],
+        offset: 0,
+        checked: false,
+        limit: PORT_VALUE_BYTES + ENVELOPE_ALLOWANCE_BYTES,
+        stream: true,
+    };
+    let (mut sender, mut connection) = hyper::client::conn::http1::Builder::new()
+        .max_headers(MAX_HEADERS)
+        .max_buf_size(MAX_HEADER_BYTES)
+        .handshake(TokioIo::new(wire))
+        .await
+        .map_err(|_| fail())?;
+    let request = http::Request::builder()
+        .method("POST")
+        .uri("/v1/subscribe")
+        .header("Host", format!("127.0.0.1:{port}"))
+        .header("Authorization", format!("Bearer {bearer}"))
+        .header("Connection", "close")
+        .header("Content-Type", "application/json")
+        .body(Full::new(Bytes::from(body)))
+        .map_err(|_| fail())?;
+    let response = sender.send_request(request);
+    tokio::pin!(response);
+    let mut complete = false;
+    let response = tokio::select! {biased;
+        response = &mut response => response.map_err(|_| fail())?,
+        _ = &mut connection => { complete = true; response.await.map_err(|_| fail())? },
+    };
+    let status = response.status().as_u16();
+    drop(sender);
+    Ok(StreamResponse {
+        connection,
+        incoming: response.into_body(),
+        complete,
+        chunk: Bytes::new(),
+        line: vec![],
+        status,
+    })
+}
+
 async fn connect<T>(
     work: impl Future<Output = io::Result<T>>,
 ) -> Result<io::Result<T>, tokio::time::error::Elapsed> {
@@ -274,6 +408,7 @@ mod tests {
             offset: 0,
             checked: false,
             limit: 32,
+            stream: false,
         };
         let task = tokio::spawn(async move { wire.write_all(b"request bytes").await });
         tokio::task::yield_now().await;

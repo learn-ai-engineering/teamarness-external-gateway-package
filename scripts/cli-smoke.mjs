@@ -25,7 +25,10 @@ export async function smokeCli(executable, version) {
       const help = invoke(path, prefix);
       assert.match(help, /tmx workspaces/);
       assert.match(help, /No automatic retries/);
-      assert.doesNotMatch(help, /^\s+subscribe\s/m);
+      assert.match(help, /^\s+subscribe\s/m);
+      assert.match(help, /--for <duration> \| --until-cancelled/);
+      assert.match(help, /counts values only, not heartbeats/);
+      assert.match(help, /No automatic retries or reconnects/);
       assert.equal(invoke(path, [...prefix, "--version"]), `tmx ${version} (CLI 1)\n`);
       assert.equal(invoke(path, [...prefix, "--help"]), help);
     }
