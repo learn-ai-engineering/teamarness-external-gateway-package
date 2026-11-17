@@ -313,14 +313,31 @@ admission before stopping Policy and joining/checkpointing accepted disk work.
 Build `cargo build --locked -p teamarness-generated-package-backend --example
 backend-fixture` from the recorded clean revision. Its entry lives in
 `backend/tests/support/backend_fixture.rs`, links the same router/Backend modules
-and is never assembled into production `dist`. It requires
-`TEAMARNESS_FIXTURE_HOME` to be an absolute canonical private physical root and
-refuses missing/unsafe roots before Host stdio. There is no production override.
-Provision it **before** starting either Backend or CLI fixture. Stage/hash/admit
-these fixture bytes separately as a fixture Package Directory; Host Initialization
-still supplies the actual admitted source digest. Never patch production dist or
-substitute fixture hashes for the production artifact. These are injected-home
-qualification results, not production OS-home/native installation evidence.
+and is never assembled into production `dist`. Backend mode requires
+`TEAMARNESS_FIXTURE_ROOT` to name an existing canonical, owned, exact-0700 physical
+directory before SDK stdio starts. At SDK activation it creates/validates an owned
+0700 child using descriptor-relative no-follow operations under that pinned root.
+The child name is lowercase hexadecimal SHA-256 of the canonical lowercase
+Installation identity's UTF-8 bytes (the 64-hex identity string, not decoded key
+bytes). All Workspaces of one Installation share this home; different Installations
+have separate homes. Workspace ID and cwd never affect the child name. Unsafe or
+replaced roots/children fail closed without repair or ordinary-home fallback.
+
+The same fixture bytes, including a managed copy whose basename is `tmx`, use the
+shared pre-runtime selector and production CLI library. For each CLI process set
+`TEAMARNESS_FIXTURE_HOME` to the exact existing canonical owned-0700 child derived
+above. CLI mode never rederives it or requires ROOT. Picker mode dispatches before
+both environment checks, preserving the private request/lifeline protocol without
+home/root effects. No fixture environment variable is read by production entry.
+
+Provision ROOT **before** the Host process starts and HOME **before** a copied CLI
+invocation. Backend mode accepts no arguments or only the actual fixed ordered
+Host launch-token/protocol pair; arbitrary, duplicate and mixed modes refuse.
+The SDK continues to own initialization and protocol validation unchanged.
+Stage/hash/admit fixture bytes separately as a fixture Package Directory; Host
+Initialization still supplies the actual admitted source digest. Never patch
+production dist or substitute fixture hashes for the production artifact. These
+are injected-home qualification results, not production OS-home/native installation evidence.
 Installed checks require the disposable OS account/home and M1–M5 observations.
 
 `tmx --licenses` prints embedded third-party license texts and their source

@@ -1,34 +1,47 @@
 //! Injected-home real-Host qualification driver. Never assembled into dist.
-//! Root is mandatory; no ordinary-home fallback and no production override.
+//! Host mode requires ROOT; copied basename-tmx CLI mode requires the exact HOME child.
+//! Neither has an ordinary-home fallback or a production override.
 #![forbid(unsafe_code)]
-use std::os::unix::fs::PermissionsExt;
+mod fixture_home;
+use teamarness_generated_package_backend::{
+    cli::{self, EntryMode},
+    setup::BackendEnvironment,
+};
 fn main() -> std::process::ExitCode {
-    let Some(home) = std::env::var_os("TEAMARNESS_FIXTURE_HOME").map(std::path::PathBuf::from)
-    else {
-        eprintln!("fixture home required");
-        return 2.into();
-    };
-    if !home.is_absolute()
-        || home.canonicalize().ok().as_ref() != Some(&home)
-        || teamarness_generated_package_backend::client_store::ClientStore::for_home(&home).is_err()
-        || home
-            .metadata()
-            .map(|m| m.permissions().mode() & 0o7777 != 0o700)
-            .unwrap_or(true)
-        || std::env::args_os().len() != 1
-    {
-        return 2.into();
-    }
-    match tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(runtime) => runtime.block_on(
-            teamarness_generated_package_backend::router_with_environment(
-                teamarness_generated_package_backend::setup::BackendEnvironment::injected(home),
-            )
-            .run(),
-        ),
-        Err(_) => std::process::ExitCode::FAILURE,
+    match cli::select_entry(std::env::args_os().collect()) {
+        EntryMode::Picker => teamarness_generated_package_backend::picker_helper::entry().into(),
+        EntryMode::Invalid => 2.into(),
+        EntryMode::Cli(args) => match fixture_home::cli_home() {
+            Ok(home) => cli::run(args, Some(home)).into(),
+            Err(()) => {
+                eprintln!("fixture home invalid or missing");
+                2.into()
+            }
+        },
+        EntryMode::Backend => {
+            let root = match fixture_home::Root::from_environment() {
+                Ok(root) => root,
+                Err(()) => {
+                    eprintln!("fixture root invalid or missing");
+                    return 2.into();
+                }
+            };
+            let environment = BackendEnvironment::injected_from_initialization(move |init| {
+                root.installation_home(&init.installation().identity)
+                    .map_err(|_| {
+                        teamarness_generated_package_backend::error("fixture_home_invalid")
+                    })
+            });
+            match tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime.block_on(
+                    teamarness_generated_package_backend::router_with_environment(environment)
+                        .run(),
+                ),
+                Err(_) => std::process::ExitCode::FAILURE,
+            }
+        }
     }
 }

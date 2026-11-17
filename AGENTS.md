@@ -260,8 +260,15 @@ A pre-journal death can leave a private random staging orphan; retry never adopt
 or reclaims it. `setup.rs` wires actual owning-Installation activation/reload refresh and explicit
 coordinator consent. All automated Backend constructors must inject private
 physical homes, including regression harnesses. No automated test may resolve,
-read or install into the ordinary home. The unassembled `backend-fixture` entry
-requires its physical private root; production accepts no override.
+read or install into the ordinary home. The unassembled `backend-fixture` Backend
+entry requires canonical owned0700 `TEAMARNESS_FIXTURE_ROOT` before SDK stdio.
+At SDK activation its home is the safe owned0700 child named lowercase hex SHA-256
+of canonical lowercase Installation identity UTF-8 (not decoded key bytes); all
+Workspaces of that Installation share it. Copied basename-tmx fixture CLI requires
+`TEAMARNESS_FIXTURE_HOME` set to that exact existing child, never rederives it or
+falls back. Picker dispatch precedes fixture environment checks. Production accepts
+no override and never reads fixture environment. Both entries share fixed strict
+pre-runtime mode selection, including the actual ordered Host launch arguments.
 
 `setup.rs` retains four ten-minute read-only previews and one owned unfinished
 operation. Its private client journal precedes recognized outputs, the narrow

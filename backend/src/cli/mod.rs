@@ -283,8 +283,17 @@ fn emit(mut outcome: Outcome) -> u8 {
     }
     outcome.exit
 }
-/// Entry selection must happen before constructing any async runtime or native application.
-pub fn entry(arguments: Vec<std::ffi::OsString>) -> std::process::ExitCode {
+/// Shared pre-runtime selection for the admitted executable and unassembled fixture.
+#[derive(Debug, PartialEq, Eq)]
+pub enum EntryMode {
+    Backend,
+    Cli(Vec<String>),
+    Picker,
+    Invalid,
+}
+/// Admit only the fixed ordered Host launch form, never an arbitrary-argument fallback.
+/// The SDK still owns initialization and protocol validation.
+pub fn select_entry(arguments: Vec<std::ffi::OsString>) -> EntryMode {
     let is_tmx = arguments
         .first()
         .and_then(|p| Path::new(p).file_name())
@@ -301,21 +310,42 @@ pub fn entry(arguments: Vec<std::ffi::OsString>) -> std::process::ExitCode {
             .collect::<Result<Vec<_>, _>>()
         {
             Ok(a) => a,
-            Err(_) => return emit(Failure::usage("cli.invalid_arguments").into()).into(),
+            Err(_) => return EntryMode::Invalid,
         };
-        return run(args, None).into();
+        return EntryMode::Cli(args);
     }
     if args.len() == 1 && args[0] == "--tmx-picker" {
-        return crate::picker_helper::entry().into();
+        return EntryMode::Picker;
     }
-    if !args.is_empty() {
-        return emit(Failure::usage("cli.invalid_arguments").into()).into();
+    if args.is_empty() || valid_host_arguments(&args) {
+        EntryMode::Backend
+    } else {
+        EntryMode::Invalid
     }
-    match tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(r) => r.block_on(crate::router().run()),
-        Err(_) => std::process::ExitCode::FAILURE,
+}
+fn valid_host_arguments(args: &[std::ffi::OsString]) -> bool {
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    args.len() == 2
+        && args[1] == "--teamarness-protocol=1"
+        && args[0]
+            .to_str()
+            .and_then(|a| a.strip_prefix("--teamarness-launch-token="))
+            .filter(|token| token.len() == 43)
+            .and_then(|token| URL_SAFE_NO_PAD.decode(token).ok())
+            .is_some_and(|token| token.len() == 32)
+}
+/// Entry selection must happen before constructing any async runtime or native application.
+pub fn entry(arguments: Vec<std::ffi::OsString>) -> std::process::ExitCode {
+    match select_entry(arguments) {
+        EntryMode::Cli(args) => run(args, None).into(),
+        EntryMode::Picker => crate::picker_helper::entry().into(),
+        EntryMode::Invalid => emit(Failure::usage("cli.invalid_arguments").into()).into(),
+        EntryMode::Backend => match tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(r) => r.block_on(crate::router().run()),
+            Err(_) => std::process::ExitCode::FAILURE,
+        },
     }
 }

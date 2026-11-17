@@ -36,10 +36,12 @@ fn disk<T>(r: std::result::Result<T, impl std::fmt::Debug>) -> Result<T> {
 fn output(e: install::InstallError) -> BackendError {
     BackendError::new(e.code(), false, json!({}))
 }
+type InitializationHome = Arc<dyn Fn(&Initialization) -> Result<PathBuf> + Send + Sync>;
 /// External OS seams only; owned stores, Policy and installers are never substituted.
 #[derive(Clone)]
 pub struct BackendEnvironment {
     home: Option<PathBuf>,
+    initialization_home: Option<InitializationHome>,
     source: Option<(PathBuf, Admitted)>,
     pub storage_fault: Option<Arc<dyn StorageFault>>,
     pub client_fault: Option<Arc<dyn StorageFault>>,
@@ -51,6 +53,7 @@ impl Default for BackendEnvironment {
     fn default() -> Self {
         Self {
             home: None,
+            initialization_home: None,
             source: None,
             storage_fault: None,
             client_fault: None,
@@ -65,6 +68,16 @@ impl BackendEnvironment {
     pub fn injected(home: PathBuf) -> Self {
         Self {
             home: Some(home),
+            ..Self::default()
+        }
+    }
+    /// Unassembled fixture seam: derive a private home from SDK-bound identity on blocking work.
+    /// Production never installs this resolver or reads fixture environment variables.
+    pub fn injected_from_initialization(
+        resolve: impl Fn(&Initialization) -> Result<PathBuf> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            initialization_home: Some(Arc::new(resolve)),
             ..Self::default()
         }
     }
@@ -87,7 +100,14 @@ impl BackendEnvironment {
             ),
         })
     }
-    async fn resolve_home(&self) -> Result<PathBuf> {
+    async fn resolve_home(&self, init: &Initialization) -> Result<PathBuf> {
+        if let Some(resolve) = &self.initialization_home {
+            let resolve = resolve.clone();
+            let init = init.clone();
+            return tokio::task::spawn_blocking(move || resolve(&init))
+                .await
+                .map_err(|_| error("home_unavailable"))?;
+        }
         match &self.home {
             Some(p) => Ok(p.clone()),
             None => crate::cli::home::resolve()
@@ -316,7 +336,7 @@ impl SetupCoordinator {
         init: &Initialization,
         environment: BackendEnvironment,
     ) -> Result<Arc<Self>> {
-        let home = environment.resolve_home().await?;
+        let home = environment.resolve_home(init).await?;
         let (source, admitted) = environment.executable(init)?;
         let key = crate::catalog::digest(
             format!(
