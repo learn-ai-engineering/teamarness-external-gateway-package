@@ -129,6 +129,7 @@ pub fn router_with_environment_and_entropy(
     .request("external-gateway.setup.preview",|c:Context<State>,p:setup::Preview|async move{c.state().setup.preview(p).await})
     .request("external-gateway.setup.apply",|c:Context<State>,p:setup::Apply|async move{c.state().setup.apply(p).await})
     .request("external-gateway.setup.status",|c:Context<State>,_:Empty|async move{Ok(c.state().setup.status().await)})
+    .request("external-gateway.setup.inspect",|c:Context<State>,_:Empty|async move{c.state().setup.inspect().await})
     .subscription("external-gateway.setup.choose-skill-folder",|c:Context<State>,_:Empty|async move{c.state().picker.choose(c.state().setup.clone(),c.cancellation().clone())})
     .subscription("external-gateway.setup.watch",|c:Context<State>,_:Empty|async move{
         let (sender,stream)=event_channel(1);let mut status=c.state().setup.receipt_watch();let mut policy=c.state().policy.watch();let cancel=c.cancellation().clone();let setup=c.state().setup.clone();

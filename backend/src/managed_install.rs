@@ -535,6 +535,11 @@ impl CommandPlan {
         })
     }
 }
+/// Recognition of installed bytes, independent of a running candidate's source validity.
+pub struct CommandObservation {
+    pub version: Option<String>,
+    pub pending: bool,
+}
 /// This object has no authorization methods. Construction/preview never creates a directory.
 pub struct ManagedInstaller {
     pub(crate) home: PathBuf,
@@ -604,6 +609,45 @@ impl ManagedInstaller {
             }
         })?;
         Ok((dir, lock))
+    }
+    /// Read only: no installer lock, directory creation, temporary cleanup or recovery.
+    pub fn observe_command(&self) -> Result<CommandObservation> {
+        self.home_pin.check()?;
+        let output = self.command_path();
+        let receipt = self.state_path().join(COMMAND_RECEIPT);
+        let state = Pin::capture(&self.state_path())?;
+        let pending = pending_journal(&state, "command.journal")?;
+        let installed = if let Some(bytes) = &pending {
+            let j: Journal = parse(bytes)?;
+            if j.kind != Kind::Command || j.output != output || j.receipt != receipt {
+                return Err(InstallError::InvalidState);
+            }
+            for pin in &j.pins {
+                pin.check()?;
+            }
+            let actual = raw_digest(&output, Kind::Command)?;
+            if actual == Some(j.new_digest()?) {
+                let current = read_at(&state.open()?, COMMAND_RECEIPT, 0o600, MAX_STATE as u64)?;
+                if current != j.old_receipt && current.as_ref() != Some(&j.new_receipt) {
+                    return Err(InstallError::Collision);
+                }
+                Some(j.new_receipt)
+            } else if actual == j.old_digest {
+                ensure_old(&j)?;
+                j.old_receipt
+            } else {
+                return Err(InstallError::Collision);
+            }
+        } else {
+            observed(&output, &receipt, Kind::Command)?.receipt
+        };
+        let version = installed
+            .map(|bytes| parse::<Receipt>(&bytes).map(|r| r.admission.version))
+            .transpose()?;
+        Ok(CommandObservation {
+            version,
+            pending: pending.is_some(),
+        })
     }
     pub fn preview(&self, source: &Path, admission: Admitted) -> Result<CommandPlan> {
         self.home_pin.check()?;
@@ -847,7 +891,7 @@ impl ManagedInstaller {
     }
     fn recover(&self, name: &str, kind: Kind) -> Result<Recovery> {
         let pin = Pin::capture(&self.state_path())?;
-        if !pin.complete {
+        if pending_journal(&pin, name)?.is_none() {
             return Ok(Recovery::NothingPending);
         }
         let (state, _lock) = self.lock()?;

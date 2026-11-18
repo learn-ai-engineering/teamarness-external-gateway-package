@@ -250,7 +250,8 @@
                 "repair",
                 "rotate",
                 "disconnect",
-                "install-skill"
+                "install-skill",
+                "install-cli"
               ]
             },
             {
@@ -398,6 +399,191 @@
         "disposition",
         "installed",
         "proposed"
+      ],
+      "additionalProperties": false
+    },
+    "SetupInspection": {
+      "type": "object",
+      "properties": {
+        "cli": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "enum": [
+                "missing",
+                "installed",
+                "blocked",
+                "unavailable"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "version": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "change": {
+              "enum": [
+                "none",
+                "install",
+                "refresh",
+                "explicit-repair"
+              ]
+            },
+            "issue": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "external_gateway.output_unsafe",
+                    "external_gateway.output_collision",
+                    "external_gateway.output_state_invalid",
+                    "external_gateway.installer_busy",
+                    "external_gateway.setup_preview_stale",
+                    "external_gateway.output_consent_required",
+                    "external_gateway.reload_required",
+                    "external_gateway.output_repair_required",
+                    "external_gateway.output_storage_failed",
+                    "external_gateway.unavailable",
+                    "external_gateway.client_store_invalid",
+                    "external_gateway.connection_origin_conflict",
+                    "external_gateway.credential_consent_required",
+                    "external_gateway.publication_required",
+                    "external_gateway.setup_repair_required",
+                    "external_gateway.setup_state_invalid",
+                    "external_gateway.storage_failed"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "state",
+            "path",
+            "version",
+            "change",
+            "issue"
+          ],
+          "additionalProperties": false
+        },
+        "connection": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "enum": [
+                "not-connected",
+                "connected",
+                "needs-repair",
+                "conflict",
+                "unavailable"
+              ]
+            },
+            "authority": {
+              "enum": [
+                "none",
+                "current",
+                "revoked",
+                "disconnected",
+                "unavailable"
+              ]
+            },
+            "repair": {
+              "enum": [
+                "none",
+                "publication",
+                "replace-credentials",
+                "resume",
+                "cleanup"
+              ]
+            },
+            "issue": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "external_gateway.output_unsafe",
+                    "external_gateway.output_collision",
+                    "external_gateway.output_state_invalid",
+                    "external_gateway.installer_busy",
+                    "external_gateway.setup_preview_stale",
+                    "external_gateway.output_consent_required",
+                    "external_gateway.reload_required",
+                    "external_gateway.output_repair_required",
+                    "external_gateway.output_storage_failed",
+                    "external_gateway.unavailable",
+                    "external_gateway.client_store_invalid",
+                    "external_gateway.connection_origin_conflict",
+                    "external_gateway.credential_consent_required",
+                    "external_gateway.publication_required",
+                    "external_gateway.setup_repair_required",
+                    "external_gateway.setup_state_invalid",
+                    "external_gateway.storage_failed"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "state",
+            "authority",
+            "repair",
+            "issue"
+          ],
+          "additionalProperties": false
+        },
+        "recovery": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "enum": [
+                "none",
+                "pending",
+                "invalid"
+              ]
+            },
+            "intent": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "connect",
+                    "repair",
+                    "rotate",
+                    "disconnect",
+                    "install-skill"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "state",
+            "intent"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "cli",
+        "connection",
+        "recovery"
       ],
       "additionalProperties": false
     }
@@ -852,7 +1038,8 @@
               "repair",
               "rotate",
               "disconnect",
-              "install-skill"
+              "install-skill",
+              "install-cli"
             ]
           },
           "selectionId": {
@@ -880,7 +1067,8 @@
               "repair",
               "rotate",
               "disconnect",
-              "install-skill"
+              "install-skill",
+              "install-cli"
             ]
           },
           "commandPath": {
@@ -972,6 +1160,17 @@
       },
       "response": {
         "$ref": "#/$defs/SetupStatus"
+      }
+    },
+    "external-gateway.setup.inspect": {
+      "request": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "response": {
+        "$ref": "#/$defs/SetupInspection"
       }
     }
   },

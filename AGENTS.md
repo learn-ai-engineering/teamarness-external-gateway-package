@@ -320,3 +320,22 @@ Package disable requires confirmation. One summary/tool page and one active
 refresh remain bounded; closing either view clears observations, picker leases,
 secrets and timers, never an accepted setup apply. Manual M1–M5/native packaged
 qualification remain pending, not inferred from generated provenance or UI tests.
+
+Setup simplification Phase 1 adds internal `install-cli` and separate read-only
+`setup.inspect`; production UI simplification remains a subsequent phase.
+Command-only plans have no Policy revision/connection material and branch before
+Policy snapshots, ClientStore connection reads/locks, or credential-derived
+invalid flags. Valid unfinished credential work still reserves the one owner.
+Use only ManagedInstaller's existing old/new journal for command publication and
+activation recovery, including when private credential observation fails. Never
+persist InstallCli in setup Journal/Completed, invoke credential recovery after
+its failure, create/read an origin, issue tokens, migrate Policy or publish a
+skill/connection in that path. Invalid credential history remains untouched.
+Inspection reuses installer recognition independent of candidate verification;
+all disk/hash work is blocking, with a final Policy revision guard and no owner
+over disk. It creates/cleans/recovers nothing, takes no mutation lock and returns
+no credential/private-record path/opaque identity. Connection truth matches the
+current association/verifier/private record and saved port, never running state
+or last operation history. Missing bearer needs explicit replacement, endpoint
+mismatch needs publication repair, and tombstones remain denied. Status/watch
+remain historical; no filesystem monitoring, new durable schema or uninstall.

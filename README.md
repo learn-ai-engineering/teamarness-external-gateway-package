@@ -73,11 +73,31 @@ This phase is gateway-tested, not real-Host or outside-agent acceptance. Correct
 ## Managed access coordination (Backend)
 
 Closed `setup.preview`, `setup.apply`, `setup.status` and `setup.watch` operations
-coordinate connect, repair, rotate, disconnect and selected skill installation.
+coordinate connect, repair, rotate, disconnect, selected skill installation and
+independent `install-cli`. The latter rejects folder selections, uses only the
+recognized command installer's existing journal, and never reads/locks/publishes
+ClientStore connection records, creates an origin, issues credentials or changes
+Policy. Invalid private credential history is preserved; validated unfinished
+credential work still reserves the coordinator. CLI operation feedback is
+in-memory, not a new credential Journal/Completed form. No uninstall is provided.
 Preview is read-only, accepts only an opaque folder selection, expires in ten
 minutes and is limited to four plans. Apply rechecks consent and returns an
 owned operation ID; cancelling a UI observer does not cancel accepted work.
 The native folder picker supplies a bounded mount-scoped selection lease; both views use the same coordinator controls.
+
+`setup.inspect` separately observes current CLI recognition/candidate change,
+Workspace authority/local publication, and pending/invalid credential recovery.
+It is read-only, performs disk/hash work off the async runtime, and rejects raced
+Policy revisions without hiding independently observed CLI facts. No bearer,
+private record path, origin nonce or opaque identity is returned. Connected means
+an exact current verifier/private-record pair and committed saved endpoint, not
+a running listener or the latest operation result. Missing private credentials
+require explicit replacement; intact credentials with an endpoint mismatch need
+publication repair. Tombstones never mean connected. Inspection creates no
+files, takes no mutation locks, and neither recovers nor reclaims temporary files.
+Status/watch retain their existing operation-history shape. The direct-action UI
+consumer of these new internal seams is a subsequent phase; legacy bundled
+preview/apply requests remain supported.
 
 Policy remains the only authorization owner. A private client operation journal
 precedes recognized outputs, verifier commit, and atomic credential/endpoint

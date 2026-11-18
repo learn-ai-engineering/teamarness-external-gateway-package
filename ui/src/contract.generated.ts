@@ -28,12 +28,32 @@ export type ObservedContract = {
   readonly "major": number;
 };
 
+export type SetupInspection = {
+  readonly "cli": {
+    readonly "change": "none" | "install" | "refresh" | "explicit-repair";
+    readonly "issue": ("external_gateway.output_unsafe" | "external_gateway.output_collision" | "external_gateway.output_state_invalid" | "external_gateway.installer_busy" | "external_gateway.setup_preview_stale" | "external_gateway.output_consent_required" | "external_gateway.reload_required" | "external_gateway.output_repair_required" | "external_gateway.output_storage_failed" | "external_gateway.unavailable" | "external_gateway.client_store_invalid" | "external_gateway.connection_origin_conflict" | "external_gateway.credential_consent_required" | "external_gateway.publication_required" | "external_gateway.setup_repair_required" | "external_gateway.setup_state_invalid" | "external_gateway.storage_failed") | null;
+    readonly "path": string;
+    readonly "state": "missing" | "installed" | "blocked" | "unavailable";
+    readonly "version": string | null;
+  };
+  readonly "connection": {
+    readonly "authority": "none" | "current" | "revoked" | "disconnected" | "unavailable";
+    readonly "issue": ("external_gateway.output_unsafe" | "external_gateway.output_collision" | "external_gateway.output_state_invalid" | "external_gateway.installer_busy" | "external_gateway.setup_preview_stale" | "external_gateway.output_consent_required" | "external_gateway.reload_required" | "external_gateway.output_repair_required" | "external_gateway.output_storage_failed" | "external_gateway.unavailable" | "external_gateway.client_store_invalid" | "external_gateway.connection_origin_conflict" | "external_gateway.credential_consent_required" | "external_gateway.publication_required" | "external_gateway.setup_repair_required" | "external_gateway.setup_state_invalid" | "external_gateway.storage_failed") | null;
+    readonly "repair": "none" | "publication" | "replace-credentials" | "resume" | "cleanup";
+    readonly "state": "not-connected" | "connected" | "needs-repair" | "conflict" | "unavailable";
+  };
+  readonly "recovery": {
+    readonly "intent": ("connect" | "repair" | "rotate" | "disconnect" | "install-skill") | null;
+    readonly "state": "none" | "pending" | "invalid";
+  };
+};
+
 export type SetupStatus = {
   readonly "access": "unchanged" | "pending" | "configured" | "revoked" | "repair-required";
   readonly "command": "unchanged" | "pending" | "installed";
   readonly "commandPath": string | null;
   readonly "error": string | null;
-  readonly "intent": ("connect" | "repair" | "rotate" | "disconnect" | "install-skill") | null;
+  readonly "intent": ("connect" | "repair" | "rotate" | "disconnect" | "install-skill" | "install-cli") | null;
   readonly "operationId": string | null;
   readonly "phase": "idle" | "accepted" | "prepared" | "outputs" | "committed" | "complete" | "repair-required" | "conflict" | "cleanup-pending";
   readonly "skill": "not-requested" | "pending" | "installed";
@@ -109,14 +129,15 @@ export type PackageContract = {
       }; readonly response: {
         readonly "operationId": string;
       } };
+    readonly "external-gateway.setup.inspect": { readonly request: Record<string, never>; readonly response: SetupInspection };
     readonly "external-gateway.setup.preview": { readonly request: {
-        readonly "intent": "connect" | "repair" | "rotate" | "disconnect" | "install-skill";
+        readonly "intent": "connect" | "repair" | "rotate" | "disconnect" | "install-skill" | "install-cli";
         readonly "selectionId"?: string;
       }; readonly response: {
         readonly "commandChange": CommandChange | null;
         readonly "commandPath": string;
         readonly "credentialChange": boolean;
-        readonly "intent": "connect" | "repair" | "rotate" | "disconnect" | "install-skill";
+        readonly "intent": "connect" | "repair" | "rotate" | "disconnect" | "install-skill" | "install-cli";
         readonly "planId": string;
         readonly "skillChange": "not-requested" | "publish" | "unchanged";
         readonly "skillPath": string | null;

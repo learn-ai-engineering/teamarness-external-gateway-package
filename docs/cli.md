@@ -344,3 +344,38 @@ Installed checks require the disposable OS account/home and M1–M5 observations
 provenance offline, before home lookup, sockets or AppKit. Like help/version it
 needs no Workspace and accepts no other options. The same native artifact retains
 these notices after managed copy or Package Directory movement.
+
+### Independent internal CLI action and current facts
+
+The typed coordinator also accepts `install-cli` through its existing exact
+preview/apply protocol, with no folder selection. This is command publication
+only, not Connect with a throwaway credential. It does not read or lock private
+connection records, create/read an origin, issue a token, modify Policy, install
+a skill, or write a credential setup completion receipt. Malformed/future or
+other-profile private records do not block it and remain untouched. Valid
+unfinished credential work and active owned work still block competing actions.
+There is no CLI uninstall action. Command-only acceptance/progress is ephemeral;
+after restart, the recognized installer receipt/journal supplies installed truth.
+Recognized command recovery is independent of private credential observation;
+failed CLI work never invokes credential recovery.
+
+The closed `external-gateway.setup.inspect` request returns three current facts:
+`cli` (recognition/path/version and candidate change), `connection` (actual
+Workspace authority and local publication), and `recovery` (pending or invalid
+credential coordinator work, not a historical failure). Its issues are bounded
+safe codes, never secrets/private credential paths/opaque identities. Output
+errors from setup preview/rechecks include only `output: command` or
+`output: skill` where the affected output is known, not arbitrary private paths.
+Inspection is a read-only observation, not a filesystem watch: it creates no
+directories, takes no mutation locks, performs no recovery or temporary cleanup,
+and runs filesystem/hash checks on blocking work. A changed/unavailable Policy
+revision makes the connection fact unavailable; it is not an atomic cross-store
+snapshot and cannot authorize a later action without fresh admission checks.
+An intact connection remains connected when the listener is stopped or after a
+skill/CLI result. Missing bearer requires explicit replacement; endpoint-only
+mismatch permits publication repair with intact credentials. Revoked/disconnected
+tombstones never regain access through inspection. Status/watch and all five
+legacy intents/disk forms remain unchanged. The new live CLI intent is explicitly
+invalid in credential setup Journal/Completed files, so old readers never receive
+a new durable CLI history form from this implementation. The simplified UI is
+not delivered by this Backend-only phase.

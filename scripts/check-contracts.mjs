@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 const read=(p)=>readFileSync(new URL(p,import.meta.url),"utf8");
 const ui=JSON.parse(read("../ui-contract.json"));
-assert.deepEqual(Object.keys(ui.requests).sort(),["status.get","catalog.page","listener.set","port.set","package.set","tool.set","token.create","token.regenerate","token.revoke","disable-and-revoke-all","setup.preview","setup.apply","setup.status"].map(s=>`external-gateway.${s}`).sort());
+assert.deepEqual(Object.keys(ui.requests).sort(),["status.get","catalog.page","listener.set","port.set","package.set","tool.set","token.create","token.regenerate","token.revoke","disable-and-revoke-all","setup.preview","setup.apply","setup.status","setup.inspect"].map(s=>`external-gateway.${s}`).sort());
 assert.deepEqual(Object.keys(ui.subscriptions),["external-gateway.status.watch","external-gateway.setup.watch","external-gateway.setup.choose-skill-folder"]);
 for(const request of [...Object.values(ui.requests),...Object.values(ui.subscriptions)])assert.equal(request.request.additionalProperties,false);
 const manifest=JSON.parse(read("../teamarness.package.json"));
@@ -60,3 +60,16 @@ assert.deepEqual(http.$defs.manifest.properties.supportedShapes.const,[{kind:"qu
 assert.equal(http.$defs.manifest.properties.routes.properties.subscribe.const,"/v1/subscribe");
 assert.equal(http.$defs.manifest.properties.limits.properties.streams.const,8);
 console.log("Process 1.1, four shapes and closed subscription/frame contracts match.");
+
+const inspection = ui.$defs.SetupInspection;
+assert.equal(inspection.additionalProperties, false);
+assert.deepEqual(inspection.required, ["cli", "connection", "recovery"]);
+for (const fact of Object.values(inspection.properties)) {
+ assert.equal(fact.additionalProperties, false);
+ assert.deepEqual([...fact.required].sort(), Object.keys(fact.properties).sort());
+}
+const setupIntents = ["connect", "repair", "rotate", "disconnect", "install-skill", "install-cli"];
+for (const schema of [ui.requests["external-gateway.setup.preview"].request, ui.requests["external-gateway.setup.preview"].response]) assert.deepEqual(schema.properties.intent.enum, setupIntents);
+assert.deepEqual(ui.$defs.SetupStatus.properties.intent.anyOf[0].enum, setupIntents);
+assert.deepEqual(inspection.properties.recovery.properties.intent.anyOf[0].enum, setupIntents.slice(0, -1));
+console.log("Independent CLI intent and closed read-only inspection facts match; no uninstall or durable CLI recovery intent.");
