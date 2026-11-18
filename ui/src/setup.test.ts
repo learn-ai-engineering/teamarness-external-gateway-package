@@ -1,159 +1,218 @@
 import { createFakePackageClient, createPackageRequestError } from "@teamarness/package-ui-sdk/testing";
 import { typedPackageClient } from "@teamarness/package-ui-sdk";
 import { describe, expect, it } from "vitest";
-import type { PackageContract, SetupStatus } from "./contract.generated";
+import type { PackageContract, SetupInspection, SetupStatus, Status } from "./contract.generated";
 import { setupView } from "./setup";
 import { Element, installDom, button, field, flush, deferred } from "./test-dom";
 installDom();
 const idle: SetupStatus = { operationId: null, intent: null, phase: "idle", command: "unchanged", skill: "not-requested", access: "unchanged", error: null, commandPath: null, skillPath: null };
-const plan = { planId: "plan-one", intent: "connect", commandPath: "/private/fixture/.local/bin/tmx", skillPath: "/private/fixture/chosen/teamarness", credentialChange: true, commandChange: { disposition: "explicit-repair", installed: { installation: "old-owner", version: "1.0.0", sha256: "a".repeat(64) }, proposed: { installation: "new-owner", version: "1.1.0", sha256: "b".repeat(64) } }, skillChange: "publish" };
-function fake(requests = {}) { return createFakePackageClient({ requests: { "external-gateway.setup.status": () => idle, "external-gateway.setup.preview": () => plan, "external-gateway.setup.apply": () => ({ operationId: "operation-one" }), ...requests }, subscriptions: { "external-gateway.setup.watch": () => undefined, "external-gateway.setup.choose-skill-folder": () => undefined } }); }
-function start(client: ReturnType<typeof fake>, managed: boolean | "unknown" = false) {
-  const root = new Element("section"); const view = setupView(root as unknown as HTMLElement, typedPackageClient<PackageContract>(client.client));
-  if (managed !== "unknown") view.update({ desiredEnabled: false, tokens: managed ? [{ id: "managed", label: "Managed CLI", generation: 1, managed: true }] : [], running: false, port: null, storageFailed: false, warning: null, selectedContracts: 0, selectedTools: 0 });
+const policy: Status = { desiredEnabled: false, tokens: [], running: false, port: null, storageFailed: false, warning: null, selectedContracts: 0, selectedTools: 0 };
+const facts: SetupInspection = { cli: { state: "installed", path: "/private/fixture/.local/bin/tmx", version: "1.1.0", change: "none", issue: null }, connection: { state: "not-connected", authority: "none", repair: "none", issue: null }, recovery: { state: "none", intent: null } };
+const connected: SetupInspection = { ...facts, connection: { state: "connected", authority: "current", repair: "none", issue: null } };
+const version = { installation: "opaque-owner", version: "1.1.0", sha256: "b".repeat(64) };
+const plan = { planId: "opaque-plan", intent: "connect", commandPath: facts.cli.path, skillPath: null, credentialChange: true, commandChange: { disposition: "unchanged", installed: version, proposed: version }, skillChange: "not-requested" };
+function fake(requests = {}) { return createFakePackageClient({ requests: { "external-gateway.setup.inspect": () => facts, "external-gateway.setup.status": () => idle, "external-gateway.setup.preview": p => { const { intent } = p as { intent: string }; return { ...plan, intent, credentialChange: ["connect", "rotate"].includes(intent), ...(intent === "install-skill" ? { skillChange: "publish", skillPath: "/chosen/teamarness" } : {}) }; }, "external-gateway.setup.apply": () => ({ operationId: "opaque-operation" }), ...requests }, subscriptions: { "external-gateway.setup.watch": () => undefined, "external-gateway.setup.choose-skill-folder": () => undefined } }); }
+function start(client: ReturnType<typeof fake>) {
+  const root = new Element("section"); const view = setupView(root as unknown as HTMLElement, typedPackageClient<PackageContract>(client.client)); view.update(policy);
   return { root, view };
 }
-describe("Managed setup visible interaction", () => {
-  it("selects/cancels a folder, shows exact preview/change consent, and applies only its opaque plan", async () => {
+const calls = (client: ReturnType<typeof fake>, operation: string) => client.calls.filter(c => c.operation === `external-gateway.setup.${operation}`);
+const complete: SetupStatus = { ...idle, phase: "complete", intent: "connect", operationId: "opaque-operation", command: "installed", access: "configured" };
+describe("Direct managed setup", () => {
+  it("connects directly with no selection, visible protocol ceremony or opaque metadata", async () => {
     const client = fake(); const { root, view } = start(client); await flush();
-    button(root, "Choose skill folder").click(); await flush(); expect(root.textContent).toContain("Choosing folder");
-    button(root, "Cancel folder selection").click(); await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "stale", path: "/stale" }); expect(root.textContent).not.toContain("/stale");
-    button(root, "Choose skill folder").click(); await flush();
-    await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "selection-one", path: "/private/fixture/chosen" });
-    expect(root.textContent).toContain("/private/fixture/chosen"); button(root, "Preview connect").click(); await flush();
-    expect(client.calls).toContainEqual({ operation: "external-gateway.setup.preview", payload: { intent: "connect", selectionId: "selection-one" } });
-    expect(root.textContent).toContain(plan.commandPath); expect(root.textContent).toContain(plan.skillPath); expect(root.textContent).toContain("old-owner"); expect(root.textContent).toContain("1.1.0"); expect(root.textContent).toContain("b".repeat(64));
-    expect(button(root, "Apply setup").disabled).toBe(true); field(root, "Approve setup changes").click(); button(root, "Apply setup").click(); await flush();
-    expect(client.calls).toContainEqual({ operation: "external-gateway.setup.apply", payload: { planId: "plan-one" } }); expect(root.textContent).toContain("operation-one"); view.stop();
+    expect(root.textContent).toContain("CLI: Installed"); expect(root.textContent).toContain("Workspace connection: Not connected");
+    button(root, "Connect").click(); await flush();
+    expect(calls(client, "preview")).toEqual([{ operation: "external-gateway.setup.preview", payload: { intent: "connect" } }]);
+    expect(calls(client, "apply")).toEqual([{ operation: "external-gateway.setup.apply", payload: { planId: "opaque-plan" } }]);
+    for (const text of ["Preview", "Apply", "Approve", "opaque-plan", "opaque-operation", "opaque-owner", "b".repeat(64)]) expect(root.textContent).not.toContain(text);
+    expect(root.all().some(e => e.type === "checkbox")).toBe(false); expect(root.textContent).toContain("Accepted"); expect(root.textContent).not.toContain("Connected"); view.stop();
   });
-  it("shows partial outcomes, recovers on remount, and offers repair/rotate/disconnect without blind overwrite", async () => {
-    const client = fake(); let { root, view } = start(client); await flush();
-    const partial: SetupStatus = { ...idle, operationId: "operation-one", intent: "connect", phase: "repair-required", command: "installed", skill: "pending", access: "repair-required", error: "external_gateway.output_collision", commandPath: plan.commandPath, skillPath: plan.skillPath };
-    await client.emit("external-gateway.setup.watch", partial);
-    expect(root.textContent).toContain("Command: installed"); expect(root.textContent).toContain("Skill: pending"); expect(root.textContent).toContain("Access: repair-required"); expect(root.textContent).toContain("resolve the collision outside setup");
-    for (const intent of ["repair", "rotate", "disconnect"]) { button(root, `Preview ${intent}`).click(); await flush(); expect(client.calls).toContainEqual({ operation: "external-gateway.setup.preview", payload: { intent } }); }
-    button(root, "Choose skill folder").click(); await flush();
-    await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "repair-folder", path: "/private/fixture/repair" });
-    button(root, "Preview skill install").click(); await flush();
-    expect(client.calls).toContainEqual({ operation: "external-gateway.setup.preview", payload: { intent: "install-skill", selectionId: "repair-folder" } });
-    expect(root.textContent).not.toContain("Overwrite"); view.stop();
-    const recovered = fake({ "external-gateway.setup.status": () => ({ ...partial, phase: "complete", skill: "installed", access: "configured", error: null }) }); ({ root, view } = start(recovered)); await flush();
-    expect(root.textContent).toContain("Access: configured"); expect(root.textContent).toContain("operation-one"); expect(recovered.calls.filter(c => c.operation === "external-gateway.setup.apply")).toHaveLength(0); view.stop();
+  it("installs CLI independently and confirms only recognized explicit repair with human versions", async () => {
+    const client = fake({ "external-gateway.setup.inspect": () => ({ ...facts, cli: { ...facts.cli, state: "missing", version: null, change: "install" } }) }); const first = start(client); await flush(); button(first.root, "Install CLI").click(); await flush();
+    expect(calls(client, "preview")[0].payload).toEqual({ intent: "install-cli" }); expect(calls(client, "apply")).toHaveLength(1); first.view.stop();
+    const repair = fake({ "external-gateway.setup.inspect": () => ({ ...connected, cli: { ...facts.cli, change: "explicit-repair" } }), "external-gateway.setup.preview": () => ({ ...plan, intent: "install-cli", credentialChange: false, commandChange: { disposition: "explicit-repair", installed: { ...version, version: "1.2.0" }, proposed: version } }) }); const { root, view } = start(repair); await flush();
+    button(root, "Update CLI").click(); await flush(); expect(calls(repair, "apply")).toHaveLength(0); expect(root.textContent).toContain("1.2.0"); expect(root.textContent).toContain("1.1.0"); expect(root.textContent).not.toContain("opaque-owner");
+    button(root, "Cancel CLI update").click(); expect(calls(repair, "apply")).toHaveLength(0);
+    button(root, "Update CLI").click(); await flush(); button(root, "Confirm CLI update").click(); await flush(); expect(calls(repair, "apply")).toHaveLength(1); view.stop();
   });
-  it("stale apply requires new preview, observes progress, and clears requests/subscriptions on stop", async () => {
-    const client = fake({ "external-gateway.setup.apply": () => { throw createPackageRequestError({ packageError: { code: "external_gateway.setup_preview_stale" } }); } }); const { root, view } = start(client); await flush();
-    button(root, "Preview connect").click(); await flush(); field(root, "Approve setup changes").click(); button(root, "Apply setup").click(); await flush(); expect(root.textContent).toContain("setup_preview_stale"); expect(root.textContent).toContain("new preview"); expect(root.all().some(e => e.textContent === "Apply setup")).toBe(false);
-    await client.emit("external-gateway.setup.watch", { ...idle, operationId: "live", phase: "outputs", command: "installed", skill: "pending", access: "pending" }); expect(root.textContent).toContain("outputs");
-    view.stop(); view.stop(); const previous = root.textContent; await client.emit("external-gateway.setup.watch", idle); expect(root.textContent).toBe(previous);
+  it.each(["connect", "rotate", "install-skill"] as const)("refuses hidden command publication for %s", async intent => {
+    const client = fake({ "external-gateway.setup.inspect": () => intent === "rotate" ? connected : facts, "external-gateway.setup.preview": () => ({ ...plan, intent, credentialChange: intent !== "install-skill", commandChange: { ...plan.commandChange, disposition: "refresh" } }) }); const { root, view } = start(client); await flush();
+    if (intent === "install-skill") { button(root, "Install skill…").click(); await flush(); await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "selection", path: "/chosen" }); }
+    else button(root, intent === "connect" ? "Connect" : "Rotate credentials").click(); await flush();
+    expect(calls(client, "apply")).toHaveLength(0); expect(root.textContent).toContain("Install or update CLI first"); view.stop();
   });
-  it("ignores late picker establishment and status/request replies after cancel or unmount", async () => {
-    const late = deferred<SetupStatus>(); let signal: AbortSignal | undefined;
-    const client = fake({ "external-gateway.setup.status": (_p: unknown, s?: AbortSignal) => { signal = s; return late.promise; } }); const { root, view } = start(client);
-    button(root, "Choose skill folder").click(); view.stop(); late.resolve(idle); await flush(); expect(signal?.aborted).toBe(true);
-    const previous = root.textContent; await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "late", path: "/late" }); expect(root.textContent).toBe(previous);
+  it("requires a current issue-free CLI before any chooser or credential action", async () => {
+    const client = fake({ "external-gateway.setup.inspect": () => ({ ...facts, cli: { ...facts.cli, issue: "external_gateway.reload_required" } }) }); const { root, view } = start(client); await flush();
+    button(root, "Connect").click(); button(root, "Install skill…").click(); await flush(); expect(calls(client, "preview")).toHaveLength(0); expect(calls(client, "choose-skill-folder")).toHaveLength(0); expect(root.textContent).toContain("Reload"); view.stop();
   });
-});
-
-describe("Setup subscription and acceptance lifetime", () => {
-  it("closes picker/status subscriptions including late establishment and ignores stale initial status", async () => {
-    const { typedPackageClient } = await import("@teamarness/package-ui-sdk");
-    const late = deferred<SetupStatus>(); const opening = deferred<void>(); const closed: string[] = [];
-    const fakeClient = fake({ "external-gateway.setup.status": () => late.promise });
-    const client: import("@teamarness/package-ui-sdk").PackageClient = {
-      request: fakeClient.client.request,
-      subscribe: async (operation, payload, listener, options) => {
-        const stream = await fakeClient.client.subscribe(operation, payload, listener, options);
-        if (operation === "external-gateway.setup.choose-skill-folder") await opening.promise;
-        return { close: async () => { closed.push(operation); await stream.close(); } };
-      },
-    };
-    const root = new Element("section"); const view = setupView(root as unknown as HTMLElement, typedPackageClient<PackageContract>(client)); await flush();
-    await fakeClient.emit("external-gateway.setup.watch", { ...idle, phase: "prepared", operationId: "current" }); late.resolve(idle); await flush(); expect(root.textContent).toContain("current");
-    expect(button(root, "Choose skill folder").disabled).toBe(true);
-    await fakeClient.emit("external-gateway.setup.watch", { ...idle, phase: "complete", operationId: "current" });
-    button(root, "Choose skill folder").click(); await flush(); button(root, "Cancel folder selection").click(); opening.resolve(); await flush(); expect(closed).toEqual(["external-gateway.setup.choose-skill-folder"]);
-    button(root, "Choose skill folder").click(); await flush(); view.stop(); await flush();
-    expect(closed.sort()).toEqual(["external-gateway.setup.choose-skill-folder", "external-gateway.setup.choose-skill-folder", "external-gateway.setup.watch"].sort());
+  it("keeps persistent current connection facts independent of listener and historical CLI/skill results", async () => {
+    const client = fake({ "external-gateway.setup.inspect": () => connected }); const { root, view } = start(client); await flush();
+    expect(root.textContent).toContain("Workspace connection: Connected"); expect(root.textContent).toContain("Listener is stopped");
+    await client.emit("external-gateway.setup.watch", { ...complete, intent: "install-skill", skill: "installed", access: "unchanged" }); await flush();
+    expect(root.textContent).toContain("Workspace connection: Connected"); expect(root.all().some(e => e.tagName === "button" && e.textContent === "Connect")).toBe(false);
+    expect(button(root, "Rotate credentials").disabled).toBe(false); expect(button(root, "Disconnect").disabled).toBe(false); view.stop();
   });
-  it("cancel/error outcomes keep no selection and an accepted apply remount never resubmits", async () => {
-    const accepted = deferred<{ operationId: string }>(); const client = fake({ "external-gateway.setup.apply": () => accepted.promise }); const first = start(client); await flush();
-    button(first.root, "Choose skill folder").click(); await flush(); await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "cancelled" }); expect(first.root.textContent).toContain("selection cancelled");
-    button(first.root, "Choose skill folder").click(); await flush(); client.terminate("external-gateway.setup.choose-skill-folder", createPackageRequestError({ packageError: { code: "external_gateway.picker_failed" } })); expect(first.root.textContent).toContain("picker_failed");
-    button(first.root, "Preview connect").click(); await flush(); field(first.root, "Approve setup changes").click(); button(first.root, "Apply setup").click(); await flush(); first.view.stop();
-    const remount = fake({ "external-gateway.setup.status": () => ({ ...idle, operationId: "accepted", phase: "accepted", access: "pending", command: "pending" }) }); const second = start(remount); accepted.resolve({ operationId: "accepted" }); await flush();
-    expect(second.root.textContent).toContain("accepted"); expect(remount.calls.filter(c => c.operation === "external-gateway.setup.apply")).toHaveLength(0); expect(client.calls.filter(c => c.operation === "external-gateway.setup.apply")).toHaveLength(1); second.view.stop();
+  it.each([
+    [{ state: "needs-repair", authority: "current", repair: "replace-credentials", issue: "external_gateway.credential_consent_required" }, "Credentials are missing", "Rotate credentials"],
+    [{ state: "needs-repair", authority: "current", repair: "publication", issue: "external_gateway.publication_required" }, "Needs repair", "Repair"],
+    [{ state: "not-connected", authority: "revoked", repair: "none", issue: null }, "Revoked", "Connect"],
+    [{ state: "not-connected", authority: "disconnected", repair: "none", issue: null }, "Disconnected", "Connect"],
+    [{ state: "conflict", authority: "unavailable", repair: "none", issue: "external_gateway.connection_origin_conflict" }, "another app profile", null],
+  ] as const)("offers contextual current actions: %s", async (connection, text, expected) => {
+    const client = fake({ "external-gateway.setup.inspect": () => ({ ...facts, connection }) }); const { root, view } = start(client); await flush(); expect(root.textContent).toContain(text); if (expected) expect(button(root, expected).disabled).toBe(false); else expect(root.textContent).not.toContain("Rotate credentials"); view.stop();
+  });
+  it("unknown, failed, invalid and pending inspections never assert connected or offer blind connect", async () => {
+    const waiting = deferred<SetupInspection>(); const client = fake({ "external-gateway.setup.inspect": () => waiting.promise }); const { root, view } = start(client); await flush();
+    expect(root.textContent).toContain("Checking"); expect(button(root, "Connect").disabled).toBe(true);
+    waiting.resolve({ ...facts, connection: { state: "unavailable", authority: "unavailable", repair: "none", issue: "external_gateway.client_store_invalid" }, recovery: { state: "invalid", intent: null } }); await flush(); expect(root.textContent).toContain("unavailable"); expect(button(root, "Connect").disabled).toBe(true); view.stop();
+    const failed = fake({ "external-gateway.setup.inspect": () => { throw createPackageRequestError({ packageError: { code: "external_gateway.unavailable" } }); } }); const second = start(failed); await flush(); expect(second.root.textContent).toContain("unavailable"); expect(button(second.root, "Connect").disabled).toBe(true); second.view.stop();
+    const pending = fake({ "external-gateway.setup.inspect": () => ({ ...facts, connection: { ...facts.connection, state: "needs-repair", repair: "resume" }, recovery: { state: "pending", intent: "connect" } }) }); const third = start(pending); await flush(); expect(third.root.textContent).toContain("unfinished"); expect(button(third.root, "Repair").disabled).toBe(false); expect(third.root.all().some(e => e.tagName === "button" && e.textContent === "Connect")).toBe(false); third.view.stop();
   });
 });
 
-it("explains an unexpectedly ended chooser instead of silently keeping a pending selection", async () => {
-  const client = fake(); const { root, view } = start(client); await flush();
-  button(root, "Choose skill folder").click(); await flush(); client.terminate("external-gateway.setup.choose-skill-folder", null);
-  expect(root.textContent).toContain("Folder selection ended. Choose again."); expect(root.textContent).not.toContain("Choosing folder"); view.stop();
-});
-
-it("routes an already connected Workspace to an additional folder without repeating connect or changing credentials", async () => {
-  const connected: SetupStatus = { ...idle, operationId: "connected", intent: "connect", phase: "complete", command: "installed", access: "configured" };
-  const client = fake({
-    "external-gateway.setup.status": () => connected,
-    "external-gateway.setup.preview": (p: { intent: string }) => {
-      if (p.intent === "connect") throw createPackageRequestError({ packageError: { code: "external_gateway.managed_setup_required" } });
-      return { ...plan, intent: "install-skill", credentialChange: false };
-    },
+describe("Skill chooser and owned action lifetime", () => {
+  it("native selection immediately installs only skill and retains its lease through acceptance", async () => {
+    const acceptance = deferred<{ operationId: string }>(); const client = fake({ "external-gateway.setup.apply": () => acceptance.promise }); const closed: string[] = [];
+    const wrapped: ReturnType<typeof fake> = { ...client, client: { request: client.client.request, subscribe: async (operation, payload, listener, options) => { const stream = await client.client.subscribe(operation, payload, listener, options); return { close: async () => { closed.push(operation); await stream.close(); } }; } } };
+    const { root, view } = start(wrapped); await flush(); expect(root.textContent).toContain("helps your agent"); button(root, "Install skill…").click(); await flush();
+    await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "selected-folder", path: "/chosen" }); await flush();
+    expect(calls(client, "preview")).toEqual([{ operation: "external-gateway.setup.preview", payload: { intent: "install-skill", selectionId: "selected-folder" } }]); expect(calls(client, "apply")).toHaveLength(1); expect(closed).not.toContain("external-gateway.setup.choose-skill-folder");
+    acceptance.resolve({ operationId: "accepted" }); await flush(); expect(closed).toContain("external-gateway.setup.choose-skill-folder"); expect(client.calls.some(c => c.operation.includes("token."))).toBe(false); view.stop();
   });
-  const { root, view } = start(client); await flush();
-  expect(root.all().some(e => e.tagName === "button" && e.textContent === "Preview connect" && !e.disabled)).toBe(false);
-  expect(root.textContent).toContain("another folder");
-  expect(button(root, "Preview skill install").disabled).toBe(true);
-  button(root, "Choose skill folder").click(); await flush();
-  await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "second-folder", path: "/private/fixture/second" });
-  button(root, "Preview skill install").click(); await flush();
-  expect(client.calls.filter(c => c.operation === "external-gateway.setup.preview")).toEqual([{ operation: "external-gateway.setup.preview", payload: { intent: "install-skill", selectionId: "second-folder" } }]);
-  expect(root.textContent).toContain("No managed credential change");
-  expect(button(root, "Apply setup").disabled).toBe(true);
-  field(root, "Approve setup changes").click(); button(root, "Apply setup").click(); await flush();
-  await client.emit("external-gateway.setup.watch", { ...connected, operationId: "skill-two", intent: "install-skill", skill: "installed", access: "unchanged" });
-  expect(root.textContent).toContain("Command: installed"); expect(root.textContent).toContain("Skill: installed"); expect(root.textContent).toContain("Access: unchanged");
-  expect(client.calls.some(c => c.operation.includes("token."))).toBe(false);
-  expect(root.all().some(e => e.tagName === "button" && e.textContent === "Preview connect" && !e.disabled)).toBe(false);
-  view.stop();
+  it("cancel, terminal failure, stale selection and unmount never submit a skill", async () => {
+    const client = fake(); const { root, view } = start(client); await flush(); button(root, "Install skill…").click(); await flush(); button(root, "Cancel folder selection").click();
+    await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "late", path: "/late" }); expect(calls(client, "preview")).toHaveLength(0);
+    button(root, "Install skill…").click(); await flush(); await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "cancelled" }); expect(calls(client, "apply")).toHaveLength(0);
+    button(root, "Install skill…").click(); await flush(); client.terminate("external-gateway.setup.choose-skill-folder", null); expect(root.textContent).toContain("Folder selection ended");
+    button(root, "Install skill…").click(); await flush(); view.stop(); view.stop(); const text = root.textContent; await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "late", path: "/late" }); expect(root.textContent).toBe(text); expect(calls(client, "apply")).toHaveLength(0);
+  });
+  it("closes late chooser establishment and invalidates a preview if its lease ends", async () => {
+    const opening = deferred<void>(); const preview = deferred<typeof plan>(); const closed: string[] = []; const client = fake({ "external-gateway.setup.preview": () => preview.promise });
+    const wrapped: ReturnType<typeof fake> = { ...client, client: { request: client.client.request, subscribe: async (operation, payload, listener, options) => { const stream = await client.client.subscribe(operation, payload, listener, options); if (operation === "external-gateway.setup.choose-skill-folder") await opening.promise; return { close: async () => { closed.push(operation); await stream.close(); } }; } } };
+    const first = start(wrapped); await flush(); button(first.root, "Install skill…").click(); await flush(); button(first.root, "Cancel folder selection").click(); opening.resolve(); await flush(); expect(closed).toContain("external-gateway.setup.choose-skill-folder"); first.view.stop();
+    const second = start(client); await flush(); button(second.root, "Install skill…").click(); await flush(); await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "lease", path: "/chosen" }); await flush(); client.terminate("external-gateway.setup.choose-skill-folder", null); preview.resolve({ ...plan, intent: "install-skill" }); await flush(); expect(calls(client, "apply")).toHaveLength(0); second.view.stop();
+  });
+  it("ignores late acceptance after completed result; remount observes without replay", async () => {
+    const accepted = deferred<{ operationId: string }>(); const client = fake({ "external-gateway.setup.apply": () => accepted.promise }); const { root, view } = start(client); await flush(); button(root, "Connect").click(); await flush();
+    await client.emit("external-gateway.setup.watch", complete); accepted.resolve({ operationId: "opaque-operation" }); await flush(); expect(root.textContent).not.toContain("Accepted"); expect(root.textContent).toContain("Connection completed");
+    const dismiss = button(root, "Dismiss setup notification"); await client.emit("external-gateway.setup.watch", complete); expect(button(root, "Dismiss setup notification")).toBe(dismiss); dismiss.click(); expect(field(root, "Setup notification").hidden).toBe(true);
+    await client.emit("external-gateway.setup.watch", { ...complete, phase: "repair-required", error: "external_gateway.output_collision" }); expect(field(root, "Setup notification").hidden).toBe(false); view.stop();
+    const remount = fake({ "external-gateway.setup.status": () => complete, "external-gateway.setup.inspect": () => connected }); const second = start(remount); await flush(); expect(calls(remount, "apply")).toHaveLength(0); expect(second.root.textContent).toContain("Workspace connection: Connected"); second.view.stop();
+  });
+  it("stale plan and collision failures are actionable and target-specific, not overwrite or folder advice for CLI", async () => {
+    const client = fake({ "external-gateway.setup.apply": () => { throw createPackageRequestError({ packageError: { code: "external_gateway.setup_preview_stale" } }); } }); const { root, view } = start(client); await flush(); button(root, "Connect").click(); await flush(); expect(root.textContent).toContain("changed"); expect(root.textContent).not.toContain("setup_preview_stale"); expect(calls(client, "apply")).toHaveLength(1); view.stop();
+    for (const output of ["command", "skill"]) { const broken = fake({ "external-gateway.setup.preview": () => { throw createPackageRequestError({ packageError: { code: "external_gateway.output_collision", details: { output } } }); } }); const next = start(broken); await flush(); button(next.root, "Connect").click(); await flush(); expect(next.root.textContent).toContain(output === "command" ? "CLI target" : "selected skill"); expect(next.root.textContent).not.toContain("output_collision"); expect(calls(broken, "apply")).toHaveLength(0); next.view.stop(); }
+  });
 });
 
-it("dismisses identical setup completion notifications without hiding pending work or later failures", async () => {
-  const completed: SetupStatus = { ...idle, operationId: "done", intent: "connect", phase: "complete", command: "installed", skill: "not-requested", access: "configured" };
-  const client = fake({ "external-gateway.setup.status": () => completed }); const { root, view } = start(client); await flush();
-  button(root, "Dismiss setup notification").click();
-  await client.emit("external-gateway.setup.watch", completed);
-  const notice = field(root, "Setup notification"); expect(notice.hidden).toBe(true);
-  await client.emit("external-gateway.setup.watch", { ...completed, phase: "outputs", skill: "pending" }); expect(notice.hidden).toBe(false); expect(notice.textContent).toContain("pending");
-  await client.emit("external-gateway.setup.watch", { ...completed, phase: "repair-required", access: "repair-required", error: "external_gateway.output_collision" });
-  expect(notice.hidden).toBe(false); expect(notice.textContent).toContain("output_collision"); view.stop();
+describe("Coalesced revision-guarded inspection", () => {
+  it("coalesces Policy/event invalidations and never hashes on repeated progress", async () => {
+    const initial = deferred<SetupInspection>(); let reads = 0; const client = fake({ "external-gateway.setup.inspect": () => ++reads === 1 ? initial.promise : connected }); const { root, view } = start(client); await flush();
+    for (let n = 1; n < 10; n++) view.update({ ...policy, tokens: [{ id: "managed", label: "Managed", generation: n, managed: true }] });
+    await client.emit("external-gateway.setup.watch", { ...idle, phase: "outputs", operationId: "running" }); for (let n = 0; n < 10; n++) await client.emit("external-gateway.setup.watch", { ...idle, phase: "outputs", operationId: "running" });
+    expect(reads).toBe(1); initial.resolve(facts); await flush(); expect(reads).toBe(2); expect(root.textContent).toContain("Workspace connection: Connected");
+    for (let n = 0; n < 10; n++) await client.emit("external-gateway.setup.watch", { ...idle, phase: "outputs", operationId: "running" }); expect(reads).toBe(2);
+    await client.emit("external-gateway.setup.watch", complete); await flush(); expect(reads).toBe(3); view.stop();
+  });
+  it("aborts read on stop and ignores late initial status after a newer completion", async () => {
+    const initial = deferred<SetupStatus>(); const inspect = deferred<SetupInspection>(); let signal: AbortSignal | undefined;
+    const client = fake({ "external-gateway.setup.status": () => initial.promise, "external-gateway.setup.inspect": (_p: unknown, s?: AbortSignal) => { signal = s; return inspect.promise; } }); const { root, view } = start(client); await flush(); await client.emit("external-gateway.setup.watch", complete); initial.resolve(idle); await flush(); expect(root.textContent).toContain("Connection completed"); view.stop(); const text = root.textContent; inspect.resolve(facts); await flush(); expect(signal?.aborted).toBe(true); expect(root.textContent).toBe(text);
+  });
 });
 
-it("does not let a late acceptance reply replace a completed dismissible outcome", async () => {
-  const accepted = deferred<{ operationId: string }>();
-  const client = fake({ "external-gateway.setup.apply": () => accepted.promise }); const { root, view } = start(client); await flush();
-  button(root, "Preview connect").click(); await flush(); field(root, "Approve setup changes").click(); button(root, "Apply setup").click(); await flush();
-  await client.emit("external-gateway.setup.watch", { ...idle, operationId: "fast", intent: "connect", phase: "complete", command: "installed", access: "configured" });
-  accepted.resolve({ operationId: "fast" }); await flush();
-  expect(root.textContent).not.toContain("Accepted operation:"); button(root, "Dismiss setup notification").click(); expect(field(root, "Setup notification").hidden).toBe(true); view.stop();
+it("immediately marks invalidated current facts as checking and rejects a preview overtaken by a Policy change", async () => {
+  const held = deferred<typeof plan>(); let current = connected;
+  const client = fake({ "external-gateway.setup.inspect": () => current, "external-gateway.setup.preview": () => held.promise }); const { root, view } = start(client); await flush();
+  button(root, "Rotate credentials").click(); await flush(); expect(root.textContent).toContain("Rotating credentials…");
+  current = { ...facts, connection: { ...facts.connection, authority: "revoked" } }; view.update({ ...policy, tokens: [] , port: 32123 });
+  expect(root.textContent).not.toContain("Workspace connection: Connected"); expect(root.textContent).toContain("Checking");
+  held.resolve({ ...plan, intent: "rotate" }); await flush(); expect(calls(client, "apply")).toHaveLength(0); expect(root.textContent).toContain("changed"); view.stop();
 });
 
-it("keeps explained maintenance secondary and requires fresh explicit consent for each action", async () => {
-  const client = fake(); const { root, view } = start(client); await flush();
-  const maintenance = root.all().find(e => e.tagName === "details" && e.children.some(c => c.tagName === "summary" && c.textContent === "Connection maintenance"))!;
-  expect(maintenance.open).toBe(false); expect(maintenance.textContent).toContain("old generation stops working"); expect(maintenance.textContent).toContain("Shared command and skill files remain");
-  for (const intent of ["repair", "rotate", "disconnect"]) {
-    expect(button(root, `Preview ${intent}`).parent?.parent).toBe(maintenance);
-    button(root, `Preview ${intent}`).click(); await flush(); expect(button(root, "Apply setup").disabled).toBe(true);
-    field(root, "Approve setup changes").click(); button(root, "Cancel setup preview").click();
+it.each(["connect", "rotate", "install-skill"] as const)("refuses all non-unchanged or missing command summaries for %s", async intent => {
+  for (const commandChange of [null, ...["install", "explicit-repair"].map(disposition => ({ ...plan.commandChange, disposition }))]) {
+    const client = fake({ "external-gateway.setup.inspect": () => intent === "rotate" ? connected : facts, "external-gateway.setup.preview": () => ({ ...plan, intent, credentialChange: intent !== "install-skill", commandChange }) }); const { root, view } = start(client); await flush();
+    if (intent === "install-skill") { button(root, "Install skill…").click(); await flush(); await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "selection", path: "/chosen" }); }
+    else button(root, intent === "connect" ? "Connect" : "Rotate credentials").click(); await flush(); expect(calls(client, "apply")).toHaveLength(0); expect(root.textContent).toContain("Install or update CLI first"); view.stop();
   }
-  expect(client.calls.some(c => c.operation === "external-gateway.setup.apply")).toBe(false); view.stop();
 });
 
-it("waits for initial setup status before offering connect, including a slow already-current observation", async () => {
-  const initial = deferred<SetupStatus>(); const client = fake({ "external-gateway.setup.status": () => initial.promise }); const { root, view } = start(client, "unknown");
-  expect(button(root, "Preview connect").disabled).toBe(true); button(root, "Preview connect").click(); await flush();
-  expect(client.calls.some(c => c.operation === "external-gateway.setup.preview")).toBe(false);
-  initial.resolve({ ...idle, phase: "complete", access: "configured" }); await flush();
-  expect(root.all().some(e => e.tagName === "button" && e.textContent === "Preview connect")).toBe(false); view.stop();
+it("rechecks non-null CLI issues before credential acceptance, without hiding the independent connection", async () => {
+  let reads = 0; const client = fake({ "external-gateway.setup.inspect": () => ++reads === 1 ? connected : { ...connected, cli: { ...facts.cli, issue: "external_gateway.reload_required" } } }); const { root, view } = start(client); await flush(); button(root, "Rotate credentials").click(); await flush();
+  expect(calls(client, "preview")).toHaveLength(0); expect(calls(client, "apply")).toHaveLength(0); expect(root.textContent).toContain("Reload"); expect(root.textContent).toContain("Workspace connection: Connected"); view.stop();
+});
+
+it("discards exceptional CLI confirmation on changed facts and surfaces stale confirmed apply without retry", async () => {
+  const client = fake({ "external-gateway.setup.inspect": () => ({ ...facts, cli: { ...facts.cli, change: "explicit-repair" } }), "external-gateway.setup.preview": () => ({ ...plan, intent: "install-cli", credentialChange: false, commandChange: { ...plan.commandChange, disposition: "explicit-repair" } }), "external-gateway.setup.apply": () => { throw createPackageRequestError({ packageError: { code: "external_gateway.setup_preview_stale" } }); } });
+  const { root, view } = start(client); await flush(); button(root, "Update CLI").click(); await flush(); view.update({ ...policy, port: 32123 }); await flush(); expect(root.textContent).not.toContain("Confirm CLI update"); expect(calls(client, "apply")).toHaveLength(0);
+  button(root, "Update CLI").click(); await flush(); button(root, "Confirm CLI update").click(); await flush(); expect(calls(client, "apply")).toHaveLength(1); expect(root.textContent).toContain("changed"); expect(root.textContent).not.toContain("Confirm CLI update"); view.stop();
+});
+
+it("repairs cleanup without CLI publication and disconnects directly without a selected folder", async () => {
+  const cleanup = fake({ "external-gateway.setup.inspect": () => ({ ...facts, connection: { ...facts.connection, authority: "disconnected", state: "needs-repair", repair: "cleanup" }, recovery: { state: "pending", intent: "disconnect" } }), "external-gateway.setup.preview": () => ({ ...plan, intent: "repair", commandChange: null, credentialChange: false }) }); const first = start(cleanup); await flush(); button(first.root, "Repair").click(); await flush(); expect(calls(cleanup, "apply")).toHaveLength(1); first.view.stop();
+  const client = fake({ "external-gateway.setup.inspect": () => connected }); const { root, view } = start(client); await flush(); button(root, "Disconnect").click(); await flush(); expect(calls(client, "preview")[0].payload).toEqual({ intent: "disconnect" }); expect(calls(client, "apply")).toHaveLength(1); expect(root.textContent).toContain("shared CLI and skill files remain"); view.stop();
+});
+
+it("an unmounted action cannot apply a late preview or redraw a late acceptance", async () => {
+  const preview = deferred<typeof plan>(); const client = fake({ "external-gateway.setup.preview": () => preview.promise }); const first = start(client); await flush(); button(first.root, "Connect").click(); await flush(); first.view.stop(); preview.resolve(plan); await flush(); expect(calls(client, "apply")).toHaveLength(0);
+  const accepted = deferred<{ operationId: string }>(); const later = fake({ "external-gateway.setup.apply": () => accepted.promise }); const second = start(later); await flush(); button(second.root, "Connect").click(); await flush(); second.view.stop(); const text = second.root.textContent; accepted.resolve({ operationId: "late" }); await flush(); expect(second.root.textContent).toBe(text); expect(calls(later, "apply")).toHaveLength(1);
+});
+
+it.each(["install-cli", "install-skill"] as const)("refuses credential changes in the independent %s action", async intent => {
+  const client = fake({ "external-gateway.setup.inspect": () => intent === "install-cli" ? { ...facts, cli: { ...facts.cli, state: "missing", change: "install" } } : facts, "external-gateway.setup.preview": () => ({ ...plan, intent, credentialChange: true }) }); const { root, view } = start(client); await flush();
+  if (intent === "install-skill") { button(root, "Install skill…").click(); await flush(); await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "selection", path: "/chosen" }); }
+  else button(root, "Install CLI").click(); await flush(); expect(calls(client, "apply")).toHaveLength(0); expect(root.textContent).toContain("unexpectedly includes credentials"); view.stop();
+});
+
+it("installs CLI despite unavailable private credentials while unknown/collision state cannot authorize replacement", async () => {
+  const client = fake({ "external-gateway.setup.inspect": () => ({ ...facts, cli: { ...facts.cli, state: "missing", change: "install" }, connection: { ...facts.connection, state: "unavailable", authority: "unavailable", issue: "external_gateway.client_store_invalid" }, recovery: { state: "invalid", intent: null } }) }); const first = start(client); await flush(); button(first.root, "Install CLI").click(); await flush(); expect(calls(client, "preview")[0].payload).toEqual({ intent: "install-cli" }); expect(calls(client, "apply")).toHaveLength(1); expect(first.root.textContent).not.toContain("Uninstall"); first.view.stop();
+  const blocked = fake({ "external-gateway.setup.inspect": () => ({ ...facts, cli: { ...facts.cli, state: "blocked", issue: "external_gateway.output_collision" } }) }); const second = start(blocked); await flush(); button(second.root, "Update CLI").click(); expect(calls(blocked, "preview")).toHaveLength(0); expect(second.root.textContent).toContain("CLI target"); expect(second.root.textContent).not.toContain("Confirm CLI update"); second.view.stop();
+});
+
+it("closes late status subscription establishment and never replays a skill selected during an invalidated inspection", async () => {
+  const opening = deferred<void>(); const inspection = deferred<SetupInspection>(); let reads = 0; const closed: string[] = [];
+  const client = fake({ "external-gateway.setup.inspect": () => ++reads === 1 ? facts : inspection.promise });
+  const wrapped: ReturnType<typeof fake> = { ...client, client: { request: client.client.request, subscribe: async (operation, payload, listener, options) => { const stream = await client.client.subscribe(operation, payload, listener, options); if (operation === "external-gateway.setup.watch") await opening.promise; return { close: async () => { closed.push(operation); await stream.close(); } }; } } };
+  const { root, view } = start(wrapped); await flush(); button(root, "Install skill…").click(); await flush(); view.update({ ...policy, port: 32123 });
+  await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "selected", path: "/chosen" }); await flush(); expect(calls(client, "preview")).toHaveLength(0);
+  inspection.resolve({ ...facts, cli: { ...facts.cli, issue: "external_gateway.reload_required" } }); await flush(); expect(calls(client, "apply")).toHaveLength(0); expect(closed).toContain("external-gateway.setup.choose-skill-folder");
+  view.stop(); opening.resolve(); await flush(); expect(closed).toContain("external-gateway.setup.watch");
+});
+
+it("does not let a late initial idle observation reopen actions after acceptance", async () => {
+  const initial = deferred<SetupStatus>(); const client = fake({ "external-gateway.setup.status": () => initial.promise }); const { root, view } = start(client); await flush(); button(root, "Connect").click(); await flush();
+  initial.resolve(idle); await flush(); expect(root.textContent).toContain("Accepted"); expect(button(root, "Connect").disabled).toBe(true); expect(calls(client, "apply")).toHaveLength(1); view.stop();
+});
+
+it("does not re-offer an action when Host acceptance is uncertain without a terminal observation", async () => {
+  const client = fake({ "external-gateway.setup.apply": () => { throw createPackageRequestError({ code: "deadline_exceeded" }); } }); const { root, view } = start(client); await flush(); button(root, "Connect").click(); await flush();
+  expect(root.textContent).toContain("Acceptance could not be confirmed"); expect(button(root, "Connect").disabled).toBe(true); expect(calls(client, "apply")).toHaveLength(1);
+  await client.emit("external-gateway.setup.watch", complete); await flush(); expect(root.textContent).toContain("Connection completed"); view.stop();
+});
+
+it.each(["connect", "install-skill"] as const)("resumes already accepted pending %s outputs without a separate CLI-install deadlock", async previousIntent => {
+  for (const disposition of ["install", "refresh", "explicit-repair"]) {
+    const client = fake({ "external-gateway.setup.inspect": () => ({ ...facts, cli: { ...facts.cli, state: "missing", version: null, change: disposition, issue: disposition === "explicit-repair" ? "external_gateway.output_repair_required" : null }, connection: { ...facts.connection, state: "needs-repair", repair: "resume" }, recovery: { state: "pending", intent: previousIntent } }), "external-gateway.setup.preview": () => ({ ...plan, intent: "repair", commandChange: { ...plan.commandChange, disposition, installed: null }, credentialChange: previousIntent === "connect", skillChange: previousIntent === "install-skill" ? "publish" : "not-requested" }) });
+    const { root, view } = start(client); await flush(); expect(button(root, "Install CLI").disabled).toBe(true); button(root, "Repair").click(); await flush();
+    expect(calls(client, "preview")[0].payload).toEqual({ intent: "repair" }); expect(calls(client, "apply")).toHaveLength(0); expect(root.textContent).toContain("previously accepted"); expect(root.textContent).toContain("1.1.0"); expect(root.textContent).not.toContain("opaque-owner");
+    button(root, "Cancel repair").click(); expect(calls(client, "apply")).toHaveLength(0); button(root, "Repair").click(); await flush(); button(root, "Confirm repair").click(); await flush();
+    expect(calls(client, "apply")).toEqual([{ operation: "external-gateway.setup.apply", payload: { planId: "opaque-plan" } }]); expect(calls(client, "preview").every(c => (c.payload as { intent: string }).intent === "repair")).toBe(true); view.stop();
+  }
+});
+
+it("does not use pending repair consent to override an unrecognized CLI collision", async () => {
+  const client = fake({ "external-gateway.setup.inspect": () => ({ ...facts, cli: { ...facts.cli, state: "blocked", issue: "external_gateway.output_collision" }, connection: { ...facts.connection, state: "needs-repair", repair: "resume" }, recovery: { state: "pending", intent: "connect" } }), "external-gateway.setup.preview": () => ({ ...plan, intent: "repair", commandChange: { ...plan.commandChange, disposition: "explicit-repair" } }) });
+  const { root, view } = start(client); await flush(); button(root, "Repair").click(); await flush(); expect(calls(client, "apply")).toHaveLength(0); expect(root.textContent).not.toContain("Confirm repair"); expect(root.textContent).toContain("CLI target"); view.stop();
+});
+
+it("ignores a failed late skill preview after cancellation rather than replacing a newer observation", async () => {
+  const release = deferred<void>(); const client = fake({ "external-gateway.setup.preview": async () => { await release.promise; throw createPackageRequestError({ packageError: { code: "external_gateway.output_collision", details: { output: "skill" } } }); } }); const { root, view } = start(client); await flush(); button(root, "Install skill…").click(); await flush(); await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "selected", path: "/chosen" }); await flush();
+  button(root, "Cancel folder selection").click(); const text = root.textContent; release.resolve(); await flush(); expect(root.textContent).toBe(text); expect(calls(client, "apply")).toHaveLength(0); view.stop();
+});
+
+it("a lost skill lease after a terminal result cannot turn completed work back into uncertain acceptance", async () => {
+  const acceptance = deferred<{ operationId: string }>(); const client = fake({ "external-gateway.setup.apply": () => acceptance.promise }); const { root, view } = start(client); await flush(); button(root, "Install skill…").click(); await flush(); await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "selected", path: "/chosen" }); await flush();
+  await client.emit("external-gateway.setup.watch", { ...complete, intent: "install-skill", skill: "installed", access: "unchanged" }); await flush(); client.terminate("external-gateway.setup.choose-skill-folder", null); acceptance.resolve({ operationId: "opaque-operation" }); await flush();
+  expect(root.textContent).toContain("Skill installation completed"); expect(root.textContent).not.toContain("Completion is unknown"); expect(button(root, "Install skill…").disabled).toBe(false); view.stop();
 });

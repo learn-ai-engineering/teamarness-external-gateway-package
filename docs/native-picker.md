@@ -52,9 +52,15 @@ The UI retains the lease through preview and apply acceptance. Apply rechecks
 that the lease is still current at acceptance; thereafter its owned operation
 retains the fixed pinned destination. Closing the view/lease cannot cancel or
 roll back accepted setup. Status/watch and remount report separate command,
-skill and access outcomes. Preview displays exact paths and installed/proposed
-command owner/version/digest; explicit checkbox consent precedes apply. Invalid
-or modified output offers reselect/external collision resolution, never overwrite.
+skill and access outcomes. **Install skill…** explains the optional skill and opens the chooser only with
+a current recognized CLI. Native folder confirmation immediately runs an internal
+exact skill-only preview/apply, retaining the lease through acceptance; Cancel
+writes nothing. Routine actions do not display preview/checkbox/apply ceremony
+or opaque provenance. A non-unchanged command change or CLI issue refuses skill
+apply and asks for the separate Install/Update CLI action first. Credential
+actions never carry a selected folder. Invalid or modified skill output offers
+reselect/external collision resolution; a CLI collision instead identifies the
+command target, never suggests that another skill folder would repair it.
 Manual token revoke remains available; managed rotation goes through setup.
 
 ## Qualification boundary

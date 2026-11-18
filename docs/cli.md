@@ -255,14 +255,15 @@ native output execution/update and real harness skill discovery remain M1/M3/M4.
 ## App-led managed setup protocol
 
 `external-gateway.setup.preview` accepts `intent` (connect, repair, rotate,
-disconnect, install-skill) and optional opaque `selectionId`. It never accepts a
+disconnect, install-skill, install-cli) and optional opaque `selectionId`. It never accepts a
 path, bearer, bytes or overwrite flag, and performs no writes. It returns the
 exact command/optional skill destination, installed/proposed command owner,
 version and digest, update disposition, skill write effect and whether credentials
 change. Explicit repair never hides an ownership transfer, downgrade or same-
 version byte change. Four
 plans expire after ten minutes. `setup.apply` accepts only `planId`, rechecks
-policy revision, running saved port, path identities and complete output digests,
+relevant Policy/listener state for credential plans, pinned path identities and
+complete output digests,
 then returns an operation ID. Repeated accepted apply discovers that operation;
 `setup.status` and `setup.watch` report secret-free command/skill/access results.
 Observer cancellation, remount and acceptance-response loss do not duplicate
@@ -377,5 +378,20 @@ mismatch permits publication repair with intact credentials. Revoked/disconnecte
 tombstones never regain access through inspection. Status/watch and all five
 legacy intents/disk forms remain unchanged. The new live CLI intent is explicitly
 invalid in credential setup Journal/Completed files, so old readers never receive
-a new durable CLI history form from this implementation. The simplified UI is
-not delivered by this Backend-only phase.
+a new durable CLI history form from this implementation.
+
+Both Package views expose these seams as direct named actions: **Install CLI** /
+**Update CLI**, **Connect**, **Rotate credentials**, **Disconnect**, **Repair**,
+and optional **Install skill…**. Routine actions internally preview then apply
+one exact plan. Only recognized exceptional CLI replacement pauses for a short
+version/management confirmation; unrecognized or modified outputs are refused.
+Connect, Rotate credentials and Install skill… refuse any CLI change or non-null
+CLI issue; first use the independent CLI action. A valid already accepted pending
+Repair is the narrow exception: it can resume required command publication with
+one concise version/output confirmation, because the Backend reserves those
+outputs and a separate CLI action cannot bypass that work. Unsafe/unrecognized
+outputs are still refused. Skill chooser confirmation installs only the
+skill, Cancel writes nothing, and credential actions never carry a folder
+selection. The live chooser lease lasts through acceptance. Current connection
+facts are separate from operation progress/results and listener running state;
+closing a view never cancels an accepted operation. There is no CLI uninstall.

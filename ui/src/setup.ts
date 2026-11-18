@@ -1,138 +1,290 @@
-import { describePackageError, isAbortError, type PackageSubscription, type TypedPackageClient } from "@teamarness/package-ui-sdk";
-import type { PackageContract, SetupStatus, Status } from "./contract.generated";
-import { action, input, node, notification } from "./dom";
+import { describePackageError, isAbortError, isPackageRequestError, packageErrorCode, type PackageSubscription, type TypedPackageClient } from "@teamarness/package-ui-sdk";
+import type { PackageContract, SetupInspection, SetupStatus, Status } from "./contract.generated";
+import { action, node, notification } from "./dom";
 type Preview = PackageContract["requests"]["external-gateway.setup.preview"];
 export type SetupIntent = Preview["request"]["intent"];
+
 /** Observation belongs to this view; accepted apply belongs to the Backend, not this mount. */
 export function setupView(root: HTMLElement, client: TypedPackageClient<PackageContract>, refreshPolicy: () => void = () => {}) {
   const section = node("section"); section.setAttribute("aria-label", "Managed setup");
+  const choices = node("fieldset");
+  const activity = node("p"); activity.setAttribute("aria-live", "polite");
+  const confirmation = node("section"); const destination = node("section");
   const error = node("p"); error.setAttribute("role", "alert");
   const progress = notification("Setup notification");
-  progress.show("loading", [node("p", "Loading setup status…")], false);
-  const destination = node("section"); const previewArea = node("section"); const controls = node("fieldset");
-  let alive = true; let busy = false; let picking = false; let pickerRevision = 0; let statusRevision = 0; let previewRevision = 0;
-  let managed: boolean | undefined; let configured = false; let observing = false; let statusKnown = false;
-  const primary = node("section");
-  const maintenance = node("details"); maintenance.className = "maintenance";
-  maintenance.append(node("summary", "Connection maintenance"));
-  const purpose = node("p");
-  const connect = action("Preview connect", () => { void previewIntent("connect"); });
-  const installSkill = action("Preview skill install", () => { void previewIntent("install-skill"); }, true);
-  connect.className = "setup-button primary"; installSkill.className = "setup-button primary";
-  const showActions = () => {
-    const connected = managed || configured;
-    purpose.textContent = connected ? "Managed access already exists. Add the skill to another folder without changing credentials, or use Connection maintenance to repair access." : "Connect this Workspace for your external agent. Optionally install its skill in a folder your agent reads.";
-    connect.disabled = connected || observing || !statusKnown || managed === undefined;
-    installSkill.disabled = !selection || picking || observing;
-    primary.replaceChildren(purpose);
-    if (!connected) primary.append(connect);
-    primary.append(installSkill);
-    controls.disabled = busy || observing;
-  };
-  let selection: { selectionId: string; path: string } | undefined;
-  let plan: Preview["response"] | undefined;
-  let picker: PackageSubscription | undefined; let watch: PackageSubscription | undefined;
+  section.append(choices, destination, confirmation, activity, progress.element, error); root.append(section);
   const pending = new AbortController();
-  const fail = (cause: unknown) => { if (alive && !isAbortError(cause)) error.textContent = `${describePackageError(cause)}. Get a new preview after resolving the problem. For modified or unrelated outputs, reselect a folder or resolve the collision outside setup; files are never blindly overwritten.`; };
-  const discardPreview = () => { previewRevision++; plan = undefined; previewArea.replaceChildren(); };
-  const closePicker = () => { pickerRevision++; picking = false; selection = undefined; const stream = picker; picker = undefined; void stream?.close().catch(() => undefined); };
-  const showDestination = () => {
-    const chooseButton = action("Choose skill folder", () => { void choose(); }, busy || picking || observing); chooseButton.className = "setup-button";
-    destination.replaceChildren(node("p", picking ? "Choosing folder… No browsing time limit." : selection ? `Selected folder: ${selection.path}` : "Optional skill: choose a folder supported by your external agent. No previous folders are remembered."), chooseButton);
-    showActions();
-    if (picking || selection) destination.append(action("Cancel folder selection", () => { closePicker(); discardPreview(); showDestination(); }, busy));
+  let alive = true; let busy = false; let observing = false; let submitting = false;
+  let submissionStatusRevision = 0;
+  let facts: SetupInspection | undefined; let inspectionFailed = false; let policy: Status | undefined;
+  let policyKey: string | undefined; let statusKey: string | undefined; let statusRevision = 0;
+  let inspectRevision = 0; let inspectedRevision = -1; let inspection: Promise<void> | undefined;
+  let actionRevision = 0; let pickerRevision = 0; let picking = false;
+  let selection: { selectionId: string; path: string } | undefined;
+  let picker: PackageSubscription | undefined; let watch: PackageSubscription | undefined;
+  let confirmPlan: Preview["response"] | undefined;
+
+  const issueText = (code: string | null, output: "command" | "skill" = "command") => {
+    switch (code) {
+      case "external_gateway.reload_required": return "Reload the Package before continuing; the available CLI source changed.";
+      case "external_gateway.output_collision":
+      case "external_gateway.output_unsafe":
+      case "external_gateway.output_state_invalid": return output === "skill" ? "The selected skill output is unrecognized, modified or unsafe. Choose another folder or resolve that output outside setup; it cannot be replaced here." : "The CLI target is unrecognized, modified or unsafe. Inspect the command target under Command path and resolve the collision outside setup; it cannot be replaced here.";
+      case "external_gateway.connection_origin_conflict": return "This Workspace has local credentials from another app profile. Disconnect using that profile first; there is no automatic transfer.";
+      case "external_gateway.client_store_invalid":
+      case "external_gateway.setup_state_invalid": return "Local connection information is unavailable or invalid. It has not been changed. Resolve the private client state before trying again.";
+      case "external_gateway.credential_consent_required": return "Credentials are missing or no longer match. Use Rotate credentials to explicitly replace them.";
+      case "external_gateway.publication_required": return "Repair the saved connection endpoint; intact credentials will be retained.";
+      case "external_gateway.storage_failed": return "Storage failed. Access is closed. Restore storage, then use Configuration to revoke a token or Disable and revoke all tokens again.";
+      case "external_gateway.output_storage_failed": return "The output could not be saved completely. Check storage and current installation status before trying again; partial files may remain.";
+      case "external_gateway.setup_preview_stale": return "Setup changed before acceptance. Check the current status and choose the action again; nothing is retried automatically.";
+      case "external_gateway.listener_required": return "Start the gateway listener on its saved port before connecting, rotating or repairing credentials.";
+      case "external_gateway.output_consent_required": return "Install or update CLI first, then choose this action again.";
+      case "external_gateway.output_repair_required": return "CLI publication is unfinished. Use Update CLI to repair recognized outputs.";
+      case "external_gateway.setup_repair_required": return "There is unfinished setup work. Use Repair to continue it before starting another action.";
+      case "external_gateway.installer_busy":
+      case "external_gateway.setup_busy": return "Another setup action is in progress. Wait for it to finish, then check the current status.";
+      case "external_gateway.picker_busy": return "A folder chooser is already open. Finish or cancel it before choosing again.";
+      case "external_gateway.picker_failed": return "Folder selection failed. Choose the skill folder again.";
+      case "external_gateway.managed_setup_required": return "Managed credentials changed. Check the current connection before choosing another action.";
+      case "external_gateway.unavailable": return "Setup is unavailable. Check the Package and connection status, then try again.";
+      default: return null;
+    }
   };
-  const choose = async () => {
-    if (!alive || busy || picking || observing) return;
-    closePicker(); discardPreview(); error.textContent = ""; picking = true; showDestination();
+  const fail = (cause: unknown) => {
+    if (!alive || isAbortError(cause)) return;
+    const output = isPackageRequestError(cause) && cause.packageError?.details?.output === "skill" ? "skill" : "command";
+    error.textContent = issueText(describePackageError(cause), output) ?? "Setup could not finish. Check the Package and current setup status before choosing the action again.";
+  };
+  const cliReady = () => facts?.cli.state === "installed" && facts.cli.change === "none" && facts.cli.issue === null;
+  const blocked = () => busy || observing || picking || !!confirmPlan;
+  const usable = () => !!facts && facts.connection.state !== "conflict" && facts.connection.state !== "unavailable" && facts.recovery.state !== "invalid" && !policy?.storageFailed;
+  const canRun = (intent: SetupIntent) => {
+    if (!facts) return false;
+    const { connection, recovery, cli } = facts;
+    if (intent === "install-cli") return recovery.state !== "pending" && cli.state !== "blocked" && cli.state !== "unavailable" && (!cli.issue || cli.issue === "external_gateway.output_repair_required");
+    if (!usable()) return false;
+    if (intent === "repair") return recovery.state === "pending" || ["publication", "resume", "cleanup"].includes(connection.repair);
+    if (recovery.state === "pending") return false;
+    if (intent === "install-skill") return cliReady();
+    if (intent === "connect") return connection.state === "not-connected" && connection.authority !== "current" && cliReady();
+    if (intent === "rotate") return connection.authority === "current" && cliReady();
+    return connection.authority === "current";
+  };
+  function render() {
+    if (!alive) return;
+    choices.replaceChildren(); destination.replaceChildren();
+    const cli = node("section"); const connection = node("section"); const skill = node("section");
+    cli.className = connection.className = skill.className = "setup-part";
+    const cliLabel = !facts ? inspectionFailed ? "Status unavailable" : "Checking…" : facts.cli.state === "missing" ? "Not installed" : facts.cli.state === "installed" ? "Installed" : facts.cli.state === "blocked" ? "Needs attention" : "Status unavailable";
+    cli.append(node("h3", `CLI: ${cliLabel}`));
+    if (facts) {
+      if (facts.cli.version) cli.append(node("small", `Version ${facts.cli.version}${facts.cli.change === "refresh" ? " · update available" : ""}`));
+      const path = node("details"); path.append(node("summary", "Command path"), node("code", facts.cli.path)); cli.append(path);
+      if (facts.cli.issue) cli.append(node("p", facts.recovery.state === "pending" && facts.cli.issue === "external_gateway.output_repair_required" ? "The required CLI output belongs to unfinished setup. Use Repair below to resume it." : issueText(facts.cli.issue) ?? "CLI status is unavailable. Check installation before continuing."));
+    }
+    const cliButton = action(facts?.cli.state === "missing" ? "Install CLI" : "Update CLI", () => { void runIntent("install-cli"); }, blocked() || !canRun("install-cli")); cliButton.className = "setup-button";
+    if (!facts || facts.cli.change !== "none" || facts.cli.state !== "installed") cli.append(cliButton);
+    let connectionLabel = inspectionFailed ? "Status unavailable" : "Checking…";
+    if (facts) {
+      const c = facts.connection;
+      connectionLabel = c.state === "connected" ? "Connected" : c.state === "needs-repair" ? "Needs repair" : c.state === "conflict" ? "Profile conflict" : c.state === "unavailable" ? "Status unavailable" : c.authority === "revoked" ? "Revoked — not connected" : c.authority === "disconnected" ? "Disconnected" : "Not connected";
+      connection.append(node("h3", `Workspace connection: ${connectionLabel}`));
+      if (c.issue) connection.append(node("p", issueText(c.issue) ?? "Connection status is unavailable. Check setup before continuing."));
+      if (policy && !policy.running) connection.append(node("p", c.state === "connected" ? "Listener is stopped. Saved credentials remain connected; start the listener to use them." : "Listener is stopped. Start it before connecting, rotating or repairing credentials; CLI and skill installation do not start it."));
+      if (facts.recovery.state === "pending") connection.append(node("p", "There is unfinished setup work. Repair resumes the previously accepted changes, including any credential changes and selected skill output."));
+      if (facts.recovery.state === "invalid") connection.append(node("p", "Saved setup recovery is unavailable or invalid. Existing data has not been reset."));
+    } else connection.append(node("h3", `Workspace connection: ${connectionLabel}`));
+    const c = facts?.connection;
+    const add = (label: string, intent: SetupIntent) => { const button = action(label, () => { void runIntent(intent); }, blocked() || !canRun(intent)); button.className = "setup-button"; connection.append(button); };
+    if (!facts || c?.state === "not-connected" && facts.recovery.state === "none" || c?.state === "unavailable" && c.authority !== "current") add("Connect", "connect");
+    if (c?.authority === "current" && c.state !== "conflict" && facts?.recovery.state === "none") {
+      connection.append(node("small", "Rotating credentials stops old access. Disconnect revokes access and removes this local connection; shared CLI and skill files remain."));
+      add("Rotate credentials", "rotate"); add("Disconnect", "disconnect");
+    }
+    if (facts && (facts.recovery.state === "pending" || ["publication", "resume", "cleanup"].includes(facts.connection.repair))) add("Repair", "repair");
+    skill.append(node("h3", "Agent skill (optional)"), node("p", "The skill helps your agent discover and use live Workspace tools through the CLI. Install it in a folder your agent reads; no credentials are included."));
+    const install = action("Install skill…", () => { void choose(); }, blocked() || !canRun("install-skill")); install.className = "setup-button"; skill.append(install);
+    if (facts && !cliReady()) skill.append(node("small", facts.recovery.state === "pending" ? "Finish unfinished setup with Repair before installing another skill." : "Install or update CLI first. No CLI or credential changes are included in skill installation."));
+    choices.append(cli, connection, skill);
+    if (picking || selection) {
+      destination.append(node("p", selection ? `Installing skill in ${selection.path}…` : "Choose a folder in the native dialog. Cancelling installs nothing."));
+      if (!submitting) destination.append(action("Cancel folder selection", () => { actionRevision++; closePicker(); busy = false; activity.textContent = ""; render(); }));
+    }
+    choices.disabled = busy || observing;
+  }
+  function closePicker() {
+    pickerRevision++; picking = false; selection = undefined;
+    const stream = picker; picker = undefined; void stream?.close().catch(() => undefined);
+  }
+  function clearConfirmation() { confirmPlan = undefined; confirmation.replaceChildren(); }
+  function invalidate() {
+    inspectRevision++;
+    facts = undefined; inspectionFailed = false;
+    clearConfirmation(); render();
+    void inspect();
+  }
+  // One coalesced chain, never a filesystem poll or one hash per progress event.
+  function inspect(): Promise<void> {
+    if (inspection) return inspection;
+    inspection = Promise.resolve().then(async () => {
+      while (alive && inspectedRevision !== inspectRevision) {
+        const revision = inspectRevision;
+        try {
+          const value = await client.request("external-gateway.setup.inspect", {}, { signal: pending.signal });
+          if (!alive) return;
+          if (revision !== inspectRevision) continue;
+          facts = value; inspectionFailed = false;
+        } catch (cause) {
+          if (!alive) return;
+          if (revision !== inspectRevision) continue;
+          facts = undefined; inspectionFailed = true; fail(cause);
+          error.textContent ||= "Setup status is unavailable. Reopen this view to check again.";
+        }
+        inspectedRevision = revision; render();
+      }
+    }).finally(() => {
+      inspection = undefined;
+      if (alive && inspectedRevision !== inspectRevision) void inspect();
+    });
+    return inspection;
+  }
+  async function inspectUntilCurrent() {
+    do { await inspect(); } while (alive && inspectedRevision !== inspectRevision);
+  }
+  async function applyPlan(plan: Preview["response"], revision: number) {
+    if (!alive || revision !== actionRevision) return;
+    submitting = true; clearConfirmation(); render();
+    const observed = statusRevision; submissionStatusRevision = observed;
+    try {
+      await client.request("external-gateway.setup.apply", { planId: plan.planId }, { signal: pending.signal });
+      if (!alive || revision !== actionRevision) return;
+      closePicker();
+      if (observed === statusRevision) {
+        statusRevision++; observing = true;
+        progress.show("accepted", [node("p", "Accepted. Waiting for completion; closing this view does not cancel accepted work.")], false);
+      }
+      refreshPolicy(); invalidate();
+    } catch (cause) {
+      if (alive && revision === actionRevision) {
+        closePicker();
+        if (observed === statusRevision) {
+          if (!packageErrorCode(cause) && !isAbortError(cause)) {
+            statusRevision++; observing = true;
+            progress.show("acceptance-unknown", [node("p", "Acceptance could not be confirmed. Accepted work may still continue. Wait for setup updates or reopen this view before starting another action.")], false);
+          } else fail(cause);
+        }
+        invalidate();
+      }
+    }
+    finally { if (alive && revision === actionRevision) { busy = false; submitting = false; render(); } }
+  }
+  async function runIntent(intent: SetupIntent, selectedRevision?: number) {
+    if (!alive || busy || observing || confirmPlan || (picking && intent !== "install-skill")) return;
+    if (!canRun(intent) && !(intent === "install-skill" && selection)) return;
+    const selected = intent === "install-skill" ? selection : undefined;
+    if (intent === "install-skill" && (!selected || selectedRevision !== pickerRevision)) return;
+    busy = true; error.textContent = ""; const revision = ++actionRevision;
+    activity.textContent = { connect: "Connecting…", rotate: "Rotating credentials…", disconnect: "Disconnecting…", repair: "Preparing connection repair…", "install-cli": "Preparing CLI installation…", "install-skill": "Preparing skill installation…" }[intent];
+    render();
+    try {
+      invalidate(); await inspectUntilCurrent();
+      if (!alive || revision !== actionRevision) return;
+      if (!canRun(intent)) { error.textContent = "Setup status changed. Check the current facts before choosing an action again."; return; }
+      const observed = inspectRevision;
+      const value = await client.request("external-gateway.setup.preview", { intent, ...(selected ? { selectionId: selected.selectionId } : {}) }, { signal: pending.signal });
+      if (!alive || revision !== actionRevision) return;
+      if (observed !== inspectRevision) { error.textContent = "Setup changed before acceptance. Check current status and choose the action again."; return; }
+      if (value.intent !== intent) { error.textContent = "Setup returned a different action. Nothing was submitted."; return; }
+      if (["install-cli", "install-skill"].includes(intent) && value.credentialChange) { error.textContent = "This action unexpectedly includes credentials. Nothing was submitted."; return; }
+      const pendingCommandRepair = intent === "repair" && facts?.recovery.state === "pending" && value.commandChange !== null && value.commandChange.disposition !== "unchanged";
+      if (pendingCommandRepair && (facts?.cli.state === "blocked" || facts?.cli.state === "unavailable" || facts?.cli.issue && facts.cli.issue !== "external_gateway.output_repair_required")) {
+        error.textContent = issueText(facts?.cli.issue ?? null) ?? "The required CLI output cannot be safely repaired here. Resolve its current status before continuing."; return;
+      }
+      if ((["connect", "rotate", "install-skill"].includes(intent) || intent === "repair" && value.commandChange !== null && !pendingCommandRepair) && (!cliReady() || value.commandChange?.disposition !== "unchanged")) {
+        error.textContent = "Install or update CLI first, then choose this action again. No command or credential changes were submitted."; return;
+      }
+      if (intent !== "install-skill" && value.skillChange !== "not-requested") {
+        // Resuming an explicitly chosen unfinished skill is allowed only by Repair.
+        if (intent !== "repair") { error.textContent = "This action unexpectedly includes a skill. Nothing was submitted."; return; }
+      }
+      if (value.commandChange && (pendingCommandRepair || intent === "install-cli" && value.commandChange.disposition === "explicit-repair")) {
+        confirmPlan = value;
+        const { installed, proposed } = value.commandChange;
+        const explanation = !installed ? `Publish the required CLI version ${proposed.version}.` : installed.installation !== proposed.installation ? `Transfer management of the recognized CLI from another app profile to this one, replacing version ${installed.version} with version ${proposed.version}.` : installed.version !== proposed.version ? `Replace the recognized CLI version ${installed.version} with version ${proposed.version}.` : installed.sha256 !== proposed.sha256 ? `Replace the recognized CLI with a different build of version ${proposed.version}.` : `Finish the recognized CLI publication for version ${proposed.version}.`;
+        const consequence = pendingCommandRepair ? value.credentialChange ? "Resume the previously accepted credential changes and any selected outputs." : value.skillChange !== "not-requested" ? "Resume the previously accepted skill output; credentials are unchanged." : "Resume the previously accepted outputs; credentials are unchanged." : "Credentials and skills are unchanged.";
+        confirmation.replaceChildren(node("h3", pendingCommandRepair ? "Resume unfinished setup?" : "Update recognized CLI?"), node("p", `${explanation} ${consequence}`), action(pendingCommandRepair ? "Cancel repair" : "Cancel CLI update", () => { actionRevision++; clearConfirmation(); render(); }), action(pendingCommandRepair ? "Confirm repair" : "Confirm CLI update", () => {
+          if (!confirmPlan || busy || observing) return;
+          const exact = confirmPlan; busy = true; void applyPlan(exact, revision);
+        }));
+        return;
+      }
+      await applyPlan(value, revision);
+    } catch (cause) { if (alive && revision === actionRevision) fail(cause); }
+    finally {
+      if (alive && revision === actionRevision) {
+        busy = false; activity.textContent = "";
+        if (intent === "install-skill" && !submitting) closePicker();
+        render();
+      }
+    }
+  }
+  async function choose() {
+    if (!alive || blocked() || !canRun("install-skill")) return;
+    closePicker(); error.textContent = ""; picking = true; render();
     const revision = pickerRevision;
+    const installSelected = () => {
+      if (!alive || revision !== pickerRevision || !picker || !selection) return;
+      picking = false;
+      if (busy || observing || confirmPlan) { closePicker(); error.textContent = "Another setup action started. Wait for it to finish, then choose the skill folder again."; render(); return; }
+      void runIntent("install-skill", revision);
+    };
     try {
       const stream = await client.subscribe("external-gateway.setup.choose-skill-folder", {}, value => {
-        if (!alive || revision !== pickerRevision) return;
-        picking = false;
-        if (value.outcome === "selected") selection = { selectionId: value.selectionId, path: value.path };
-        else { closePicker(); error.textContent = "Folder selection cancelled."; }
-        showDestination();
+        if (!alive || revision !== pickerRevision || selection) return;
+        if (value.outcome === "selected") { selection = { selectionId: value.selectionId, path: value.path }; installSelected(); }
+        else { closePicker(); render(); }
       }, { onTerminated: cause => {
         if (!alive || revision !== pickerRevision) return;
-        closePicker(); discardPreview(); showDestination(); if (cause) fail(cause); else error.textContent = "Folder selection ended. Choose again.";
+        actionRevision++; closePicker(); busy = false; activity.textContent = "";
+        const wasSubmitting = submitting;
+        const awaitingAcceptance = wasSubmitting && submissionStatusRevision === statusRevision;
+        if (awaitingAcceptance) observing = true;
+        submitting = false; render();
+        if (awaitingAcceptance) error.textContent = "Folder selection ended while acceptance was pending. Completion is unknown; check setup updates or reopen this view before starting another action.";
+        else if (!wasSubmitting) { if (cause) fail(cause); else error.textContent = "Folder selection ended. Choose again."; }
       } });
-      // SDK establishment is prompt, but cancel/unmount can still win its response race.
       if (!alive || revision !== pickerRevision) void stream.close().catch(() => undefined);
-      else picker = stream;
-    } catch (cause) { if (alive && revision === pickerRevision) { closePicker(); showDestination(); fail(cause); } }
-  };
-  const showStatus = (value: SetupStatus) => {
-    statusKnown = true;
-    if (value.access === "configured") configured = true;
-    else if (value.access === "revoked") configured = false;
-    observing = ["accepted", "prepared", "outputs", "committed"].includes(value.phase);
-    const content = node("section");
-    content.replaceChildren(node("h3", `Setup: ${value.phase}`), node("p", `Operation: ${value.operationId ?? "none"}`), node("p", `Command: ${value.command}`), node("p", `Skill: ${value.skill}`), node("p", `Access: ${value.access}`));
-    if (value.commandPath) content.append(node("p", `Command path: ${value.commandPath}`));
-    if (value.skillPath) content.append(node("p", `Skill path: ${value.skillPath}`));
-    if (value.error) content.append(node("p", `${value.error}. Required output failure does not roll back completed outputs. Reselect a safe folder or resolve the collision outside setup, then preview repair.`));
-    if (value.phase === "idle") content.replaceChildren(node("p", "No setup operation yet. Preview the changes before approving them."));
-    progress.show(JSON.stringify(value), [content], ["idle", "complete"].includes(value.phase) && !value.error);
-    showDestination(); refreshPolicy();
-  };
-  const previewIntent = async (intent: SetupIntent) => {
-    if (!alive || busy || picking || observing || (intent === "connect" && (!statusKnown || managed === undefined || managed || configured)) || (intent === "install-skill" && !selection)) return;
-    details.open = true; busy = true; controls.disabled = true; error.textContent = ""; discardPreview(); showDestination();
-    const revision = previewRevision;
-    try {
-      const selected = intent !== "disconnect" && selection ? { selectionId: selection.selectionId } : {};
-      const value = await client.request("external-gateway.setup.preview", { intent, ...selected }, { signal: pending.signal });
-      if (!alive || revision !== previewRevision) return;
-      plan = value;
-      previewArea.replaceChildren(node("h3", `2. Review changes · ${value.intent}`), node("p", `Command path: ${value.commandPath}`), node("p", `Skill path: ${value.skillPath ?? "not requested"}`), node("p", `Skill change: ${value.skillChange}`));
-      if (value.commandChange) {
-        const change = value.commandChange;
-        previewArea.append(node("p", `Command change: ${change.disposition}`));
-        for (const [label, version] of [["Installed", change.installed], ["Proposed", change.proposed]] as const) {
-          if (version) previewArea.append(node("p", `${label}: ${version.installation} · ${version.version} · ${version.sha256}`));
-        }
-      }
-      previewArea.append(node("p", value.credentialChange ? "This changes managed credentials. Rotation denies the old generation; access can be interrupted until publication is repaired. No tool permissions or listener enablement are added." : value.intent === "disconnect" ? "Disconnect revokes access before removing its matching local record; shared command and skill files remain." : "No managed credential change is proposed. Only recognized outputs can be published; existing access is retained."));
-      const consent = input("Approve setup changes", "checkbox");
-      const apply = action("Apply setup", () => { if (consent.checked) void applyPlan(); }, true);
-      apply.className = "setup-button primary";
-      consent.addEventListener("change", () => { apply.disabled = !consent.checked; });
-      const consentLabel = node("label", "I approve these exact output and access changes"); consentLabel.append(consent);
-      previewArea.append(node("h3", "3. Approve and apply"), consentLabel, apply, action("Cancel setup preview", () => { discardPreview(); }));
-    } catch (cause) { fail(cause); }
-    finally { busy = false; if (alive) { controls.disabled = false; showDestination(); } }
-  };
-  const applyPlan = async () => {
-    if (!alive || busy || !plan) return;
-    busy = true; controls.disabled = true; previewArea.replaceChildren(node("p", "Submitting setup… Accepted work continues if this view closes.")); showDestination();
-    const revision = statusRevision;
-    try {
-      const accepted = await client.request("external-gateway.setup.apply", { planId: plan.planId }, { signal: pending.signal });
-      if (!alive) return;
-      discardPreview(); closePicker(); showDestination();
-      if (revision === statusRevision) {
-        observing = true;
-        progress.show(`accepted:${accepted.operationId}`, [node("p", `Accepted operation: ${accepted.operationId}. Waiting for separate command, skill and access results. Acceptance is not completion.`)], false);
-      }
-      refreshPolicy();
-    } catch (cause) { if (alive) { discardPreview(); fail(cause); } }
-    finally { busy = false; if (alive) { controls.disabled = false; showDestination(); } }
-  };
-  for (const [intent, description] of [
-    ["repair", "Repair recognized command or access publication after a failure. Existing intact credentials are retained; unfinished work may need completion."],
-    ["rotate", "Rotate managed credentials: the old generation stops working. Clients may be interrupted until publication completes."],
-    ["disconnect", "Disconnect this Workspace: revoke managed access, then remove its matching local connection. Shared command and skill files remain."],
-  ] as const) {
-    const row = node("section"); const preview = action(`Preview ${intent}`, () => { void previewIntent(intent); }); preview.className = "setup-button";
-    row.append(node("p", description), preview); maintenance.append(row);
+      else { picker = stream; installSelected(); }
+    } catch (cause) { if (alive && revision === pickerRevision) { closePicker(); render(); fail(cause); } }
   }
-  controls.append(primary, maintenance);
-  const details = node("details"); details.className = "long-details";
-  details.append(node("summary", "Set up CLI & skill"), node("p", "Preview first, then explicitly approve. Enable the listener in Gateway before connecting; select exact tools separately. Setup never enables the listener or selects tools. Accepted setup continues independently of this view. Manual tokens remain available in Configuration."), node("h3", "1. Choose an optional skill destination"), destination, controls, previewArea);
-  section.append(details, progress.element, error); root.append(section); showDestination();
+  function showStatus(value: SetupStatus) {
+    observing = ["accepted", "prepared", "outputs", "committed"].includes(value.phase);
+    const key = JSON.stringify(value);
+    if (value.phase !== "idle") {
+      const text = observing ? "Setup is in progress. Accepted work continues if this view closes." : value.phase === "complete" ? value.intent === "install-cli" ? "CLI installation completed." : value.intent === "install-skill" ? "Skill installation completed." : value.intent === "disconnect" ? "Disconnection completed." : value.intent === "rotate" ? "Credential rotation completed." : value.intent === "repair" ? "Connection repair completed." : "Connection completed." : value.phase === "cleanup-pending" ? "Access was revoked; local cleanup still needs Repair." : "Setup did not finish. Check the current facts and repair options; completed outputs may remain.";
+      progress.show(key, [node("p", text), ...(value.error ? [node("p", issueText(value.error, value.command === "installed" && value.skill === "pending" ? "skill" : "command") ?? "Setup needs attention. Check current status before trying again.")] : [])], value.phase === "complete" && !value.error);
+    }
+    const terminal = !observing && value.phase !== "idle";
+    if (terminal && statusKey !== key) { invalidate(); refreshPolicy(); }
+    statusKey = key; render();
+  }
+  render(); void inspect();
   const revision = statusRevision;
   void client.request("external-gateway.setup.status", {}, { signal: pending.signal }).then(value => { if (alive && revision === statusRevision) showStatus(value); }).catch(fail);
-  void client.subscribe("external-gateway.setup.watch", {}, value => { if (alive) { statusRevision++; showStatus(value); } }, { onTerminated: cause => { if (alive) { if (cause) fail(cause); else error.textContent = "Setup updates ended. Reopen the view to observe the current operation."; } } }).then(stream => { if (alive) watch = stream; else void stream.close().catch(() => undefined); }).catch(fail);
-  return { previewIntent, update: (value: Status) => { if (!alive) return; managed = value.tokens.some(token => token.managed); if (!managed) configured = false; showActions(); }, stop: () => { if (!alive) return; alive = false; pending.abort(); closePicker(); discardPreview(); void watch?.close().catch(() => undefined); } };
+  void client.subscribe("external-gateway.setup.watch", {}, value => { if (alive) { statusRevision++; showStatus(value); } }, { onTerminated: cause => {
+    if (!alive) return;
+    if (cause) fail(cause); else error.textContent = "Setup updates ended. Reopen the view to check accepted work before trying again.";
+  } }).then(stream => { if (alive) watch = stream; else void stream.close().catch(() => undefined); }).catch(fail);
+  return {
+    runIntent,
+    update: (value: Status) => {
+      if (!alive) return;
+      policy = value;
+      const key = JSON.stringify([value.port, value.storageFailed, value.tokens.map(t => [t.id, t.generation, !!t.managed])]);
+      if (policyKey !== key) { policyKey = key; invalidate(); }
+      render();
+    },
+    stop: () => { if (!alive) return; alive = false; actionRevision++; pending.abort(); closePicker(); clearConfirmation(); void watch?.close().catch(() => undefined); facts = undefined; policy = undefined; },
+  };
 }

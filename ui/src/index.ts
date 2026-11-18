@@ -17,7 +17,7 @@ export function mount(context: PackageMountContext): PackageUnmount {
   if (context.view === "main") {
     const header = node("header"); const heading = node("div"); heading.className = "heading";
     heading.append(node("h1", context.package.displayName), icon("Open configuration", "⚙", () => { context.navigation?.openSettings(); }, !context.navigation));
-    header.append(heading, node("p", `Workspace: ${context.workspace.name} (${context.workspace.id})`));
+    header.append(heading, node("p", `Workspace: ${context.workspace.name}`));
     if (!context.navigation) header.append(node("small", "Update Teamarness to open Configuration from this gear. Use the Shell's Package settings in the meantime."));
     article.append(header);
   }
@@ -36,7 +36,7 @@ export function mount(context: PackageMountContext): PackageUnmount {
   const showStatus = (value: Status) => { status = value; updateView(value); };
   const shared = controls(content, client, refreshStatus);
   const setup = setupView(group(content, "Agent setup"), client, refreshStatus);
-  const mounted = context.view === "settings" ? settings(content, client, status, refreshStatus, intent => { void setup.previewIntent(intent); }) : undefined;
+  const mounted = context.view === "settings" ? settings(content, client, status, refreshStatus, intent => { void setup.runIntent(intent); }) : undefined;
   const guidance = node("details"); guidance.className = "long-details";
   guidance.append(node("summary", "External-agent onboarding"), node("p", "Person-selected · Person-authorized access. Supply a token separately through your client's local secret mechanism. Save these instructions without credentials."), node("pre", onboarding)); content.append(guidance);
   stopView = () => { shared.stop(); setup.stop(); mounted?.stop(); };

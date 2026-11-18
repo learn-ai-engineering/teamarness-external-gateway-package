@@ -2,11 +2,14 @@
 import { createFakePackageClient, createPackageRequestError, createTestMountContext } from "@teamarness/package-ui-sdk/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PackageUnmount } from "@teamarness/package-ui-sdk";
-import type { Status, Contract, Tool } from "./contract.generated";
+import type { Status, Contract, Tool, SetupInspection } from "./contract.generated";
 import { mount } from "./index";
 import { Element, installDom, button, field, flush, deferred } from "./test-dom";
 installDom();
 const status: Status = { desiredEnabled: false, tokens: [], running: false, port: null, storageFailed: false, warning: null, selectedContracts: 0, selectedTools: 0 };
+const inspection: SetupInspection = { cli: { state: "installed", path: "/private/fixture/.local/bin/tmx", version: "1.1.0", change: "none", issue: null }, connection: { state: "not-connected", authority: "none", repair: "none", issue: null }, recovery: { state: "none", intent: null } };
+const connectedInspection: SetupInspection = { ...inspection, connection: { state: "connected", authority: "current", repair: "none", issue: null } };
+const idleSetup = { operationId: null, intent: null, phase: "idle", command: "unchanged", skill: "not-requested", access: "unchanged", error: null, commandPath: null, skillPath: null };
 const emptyPage = { contracts: [], tools: [], nextCursor: null, nextOffset: null };
 let unmount: PackageUnmount | undefined;
 afterEach(async () => { await unmount?.(); unmount = undefined; vi.useRealTimers(); });
@@ -16,12 +19,12 @@ function setup(client: ReturnType<typeof createFakePackageClient>, view: "main" 
   return root;
 }
 function fake(requests = {}) {
-  return createFakePackageClient({ requests: { "external-gateway.status.get": () => status, "external-gateway.catalog.page": () => emptyPage, ...requests }, subscriptions: { "external-gateway.status.watch": () => undefined } });
+  return createFakePackageClient({ requests: { "external-gateway.status.get": () => status, "external-gateway.catalog.page": () => emptyPage, "external-gateway.setup.inspect": () => inspection, "external-gateway.setup.status": () => idleSetup, ...requests }, subscriptions: { "external-gateway.status.watch": () => undefined, "external-gateway.setup.watch": () => undefined } });
 }
 describe("External Gateway main/settings mount", () => {
   it("shows Workspace, shared status and secret-free onboarding with real settings mounted separately", async () => {
     const client = fake(); const root = setup(client); expect(root.textContent).toContain("Loading"); await flush();
-    expect(root.textContent).toContain("Test Workspace"); expect(root.textContent).toContain("workspace1"); expect(root.textContent).toContain("Person-selected"); expect(root.textContent).toContain("Listener stopped"); expect(root.textContent).toContain("<BEARER>");
+    expect(root.textContent).toContain("Test Workspace"); expect(root.textContent).not.toContain("workspace1"); expect(root.textContent).toContain("Person-selected"); expect(root.textContent).toContain("Listener stopped"); expect(root.textContent).toContain("<BEARER>");
     expect(client.calls.filter(c => c.operation === "external-gateway.catalog.page")).toHaveLength(1);
     await unmount?.(); const config = setup(fake(), "settings"); await flush();
     expect(config.textContent).toContain("All tokens share"); expect(config.textContent).toContain("passed local admission may still be sent to the Host"); expect(config.textContent).toContain("external agent's own stop control");
@@ -240,16 +243,18 @@ describe("Catalog navigation freshness", () => {
 });
 
 describe("Managed token coordinator routing", () => {
-  it("routes managed rotation through explicit preview/consent, retaining manual revoke and secret cleanup", async () => {
+  it("routes managed rotation through the same direct action, retaining manual revoke and secret cleanup", async () => {
     const client = fake({
       "external-gateway.status.get": () => ({ ...status, tokens: [{ id: "managed", label: "Managed CLI", generation: 1, managed: true }] }),
       "external-gateway.setup.status": () => ({ operationId: null, intent: null, phase: "idle", command: "unchanged", skill: "not-requested", access: "unchanged", error: null, commandPath: null, skillPath: null }),
-      "external-gateway.setup.preview": () => ({ planId: "rotate-plan", intent: "rotate", commandPath: "/private/fixture/.local/bin/tmx", skillPath: null, credentialChange: true, commandChange: null, skillChange: "not-requested" }),
+      "external-gateway.setup.inspect": () => connectedInspection,
+      "external-gateway.setup.preview": () => ({ planId: "rotate-plan", intent: "rotate", commandPath: "/private/fixture/.local/bin/tmx", skillPath: null, credentialChange: true, commandChange: { disposition: "unchanged", installed: { installation: "opaque", version: "1.1.0", sha256: "a".repeat(64) }, proposed: { installation: "opaque", version: "1.1.0", sha256: "a".repeat(64) } }, skillChange: "not-requested" }),
+      "external-gateway.setup.apply": () => ({ operationId: "rotating" }),
       "external-gateway.token.revoke": () => ({ ok: true, warning: null }),
     });
     const root = setup(client, "settings"); await flush(); button(root, "Rotate Managed CLI").click(); await flush();
     expect(client.calls).toContainEqual({ operation: "external-gateway.setup.preview", payload: { intent: "rotate" } }); expect(client.calls.filter(c => c.operation === "external-gateway.token.regenerate")).toHaveLength(0);
-    expect(button(root, "Apply setup").disabled).toBe(true); button(root, "Revoke Managed CLI").click(); await flush(); expect(client.calls).toContainEqual({ operation: "external-gateway.token.revoke", payload: { id: "managed" } });
+    expect(client.calls).toContainEqual({ operation: "external-gateway.setup.apply", payload: { planId: "rotate-plan" } }); expect(root.textContent).not.toContain("Apply setup"); button(root, "Revoke Managed CLI").click(); await flush(); expect(client.calls).toContainEqual({ operation: "external-gateway.token.revoke", payload: { id: "managed" } });
     await unmount?.(); expect(root.children).toHaveLength(0);
   });
 });
@@ -415,14 +420,15 @@ it("keeps a dismissed catalog success dismissed during polling while failures re
   expect(client.calls.some(c => c.operation === "external-gateway.listener.set")).toBe(false);
 });
 
-it.each(["main", "settings"] as const)("uses existing managed-token status after a skill-only receipt in %s without offering connect", async view => {
+it.each(["main", "settings"] as const)("uses current inspection after a skill-only receipt in %s without offering connect", async view => {
   const client = fake({
     "external-gateway.status.get": () => ({ ...status, tokens: [{ id: "managed", label: "Managed CLI", generation: 1, managed: true }] }),
+    "external-gateway.setup.inspect": () => connectedInspection,
     "external-gateway.setup.status": () => ({ operationId: "last-skill", intent: "install-skill", phase: "complete", command: "installed", skill: "installed", access: "unchanged", error: null, commandPath: null, skillPath: null }),
   });
   const root = setup(client, view); await flush();
-  expect(root.textContent).toContain("another folder"); expect(root.all().some(e => e.tagName === "button" && e.textContent === "Preview connect")).toBe(false);
-  expect(button(root, "Preview skill install").disabled).toBe(true);
+  expect(root.textContent).toContain("Workspace connection: Connected"); expect(root.all().some(e => e.tagName === "button" && e.textContent === "Connect")).toBe(false);
+  expect(button(root, "Install skill…").disabled).toBe(false);
   expect(client.calls.some(c => c.operation === "external-gateway.setup.preview" || c.operation === "external-gateway.setup.apply")).toBe(false);
 });
 
@@ -432,19 +438,40 @@ it("keeps fallback identities and stale-review contract IDs inside expanded cont
   expect(root.textContent).not.toContain(contract.provider); expect(root.textContent).not.toContain(contract.contract);
   expect(root.textContent).toContain("Host selection missing");
   field(root, "Show Unnamed Package tools").click(); await flush();
-  expect(root.textContent).toContain(contract.provider); expect(root.textContent).toContain(`${contract.contract} · major 1`);
+  expect(root.textContent).not.toContain(contract.provider); expect(root.textContent).toContain(`${contract.contract} · major 1`);
   expect(button(root, `Review access · ${contract.contract}`).disabled).toBe(false);
 });
 
-it("does not offer Connect before a delayed managed-token status resolves after a skill-only receipt", async () => {
-  const policyStatus = deferred<Status>();
+it("does not offer Connect before a delayed current inspection resolves after a skill-only receipt", async () => {
+  const currentInspection = deferred<SetupInspection>();
   const client = fake({
-    "external-gateway.status.get": () => policyStatus.promise,
+    "external-gateway.setup.inspect": () => currentInspection.promise,
     "external-gateway.setup.status": () => ({ operationId: "last-skill", intent: "install-skill", phase: "complete", command: "installed", skill: "installed", access: "unchanged", error: null, commandPath: null, skillPath: null }),
   });
   const root = setup(client); await flush();
-  expect(button(root, "Preview connect").disabled).toBe(true); button(root, "Preview connect").click(); await flush();
+  expect(button(root, "Connect").disabled).toBe(true); button(root, "Connect").click(); await flush();
   expect(client.calls.some(c => c.operation === "external-gateway.setup.preview")).toBe(false);
-  policyStatus.resolve({ ...status, tokens: [{ id: "managed", label: "Managed CLI", generation: 1, managed: true }] }); await flush();
-  expect(root.all().some(e => e.tagName === "button" && e.textContent === "Preview connect")).toBe(false);
+  currentInspection.resolve(connectedInspection); await flush();
+  expect(root.all().some(e => e.tagName === "button" && e.textContent === "Connect")).toBe(false);
+});
+
+it("acknowledges every admitted manual refresh, keeps busy disabled, and polling preserves the dismissed result", async () => {
+  vi.useFakeTimers(); let hold = false; const pending = deferred<typeof emptyPage>();
+  const client = fake({ "external-gateway.catalog.page": () => hold ? pending.promise : emptyPage }); const root = setup(client); await flush();
+  const firstDismiss = button(root, "Dismiss catalog notification"); await vi.advanceTimersByTimeAsync(5000); await flush(); expect(button(root, "Dismiss catalog notification")).toBe(firstDismiss);
+  firstDismiss.click(); hold = true; const refresh = field(root, "Refresh available Packages"); refresh.click(); await flush();
+  expect(refresh.disabled).toBe(true); expect(refresh.attributes.get("aria-busy")).toBe("true"); expect(field(root, "Catalog notification").hidden).toBe(false); expect(root.textContent).toContain("Refreshing Packages");
+  const count = client.calls.filter(c => c.operation === "external-gateway.catalog.page").length; refresh.click(); await flush(); expect(client.calls.filter(c => c.operation === "external-gateway.catalog.page")).toHaveLength(count);
+  hold = false; pending.resolve(emptyPage); await flush(); expect(refresh.disabled).toBe(false); expect(field(root, "Catalog notification").hidden).toBe(false);
+  button(root, "Dismiss catalog notification").click(); await vi.advanceTimersByTimeAsync(5000); await flush(); expect(field(root, "Catalog notification").hidden).toBe(true);
+  refresh.click(); await flush(); expect(field(root, "Catalog notification").hidden).toBe(false); expect(client.calls.some(c => c.operation === "external-gateway.listener.set")).toBe(false);
+});
+
+it("keeps explicit refresh failures visible during retry and bounds a timed-out manual read until its terminal", async () => {
+  vi.useFakeTimers(); let fail = true; let hold = false; const pending = deferred<typeof emptyPage>();
+  const client = fake({ "external-gateway.catalog.page": () => { if (hold) return pending.promise; if (fail) throw createPackageRequestError({ packageError: { code: "external_gateway.unavailable" } }); return emptyPage; } }); const root = setup(client); await flush();
+  const refresh = field(root, "Refresh available Packages"); hold = true; refresh.click(); await flush(); expect(root.textContent).toContain("external_gateway.unavailable"); expect(refresh.disabled).toBe(true);
+  await vi.advanceTimersByTimeAsync(5000); expect(root.textContent).toContain("timed out"); expect(refresh.disabled).toBe(true); const count = client.calls.length; refresh.click(); await vi.advanceTimersByTimeAsync(10000); expect(client.calls).toHaveLength(count);
+  pending.resolve(emptyPage); await flush(); expect(root.textContent).toContain("timed out"); expect(refresh.disabled).toBe(false);
+  fail = false; hold = false; refresh.click(); await flush(); expect(field(root, "Catalog notification").hidden).toBe(false); expect(root.textContent).not.toContain("timed out"); expect(root.textContent).toContain("Catalog refreshed"); expect(client.calls.some(c => c.operation === "external-gateway.listener.set")).toBe(false);
 });

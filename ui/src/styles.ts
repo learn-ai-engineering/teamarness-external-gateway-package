@@ -35,8 +35,9 @@ export const PACKAGE_STYLES = `
   .notification-close { border-left: 1px solid var(--teamarness-color-border); flex-shrink: 0; }
   .setup-button { border: 1px solid var(--teamarness-color-border); border-radius: var(--teamarness-radius-control); padding: .55rem .85rem; margin: .5rem .5rem .5rem 0; }
   .setup-button.primary { color: var(--teamarness-color-accent); border-color: var(--teamarness-color-accent); }
-  .maintenance { margin-top: .8rem; }
-  .maintenance > section { margin: .8rem 0; }
+  .setup-part + .setup-part { border-top: 1px solid var(--teamarness-color-border); padding-top: 1rem; margin-top: 1rem; }
+  .setup-part > p, .setup-part > small { display: block; margin-top: .45rem; }
+  .setup-part details { font-size: .85rem; }
   .status-toggle { display: inline-flex; align-items: center; gap: .6rem; }
   .status-toggle small { min-width: 3rem; text-align: right; font-size: .78rem; }
   .switch { position: relative; padding: 0; min-width: 32px; width: 32px; height: 18px; border: 1px solid var(--teamarness-color-text-muted); border-radius: 20px; }
@@ -55,9 +56,7 @@ export const PACKAGE_STYLES = `
   .package > section > div > p { font-size: .75rem; color: var(--teamarness-color-text-muted); }
   .package strong { font-size: .75rem; font-weight: 500; color: var(--teamarness-color-text-muted); }
   input { border: 1px solid var(--teamarness-color-border); padding: .6rem; max-width: 100%; }
-  input[type=checkbox] { width: fit-content; }
-  [aria-label="Managed setup"] > details > fieldset, .group-body > fieldset:not(:first-child) { display: grid; gap: .7rem; }
-  [aria-label="Managed setup"] > details > section { margin: .8rem 0; }
+  .group-body > fieldset:not(:first-child) { display: grid; gap: .7rem; }
   code, pre { font-family: var(--teamarness-font-mono); overflow-wrap: anywhere; white-space: pre-wrap; font-size: .8rem; }
   pre { line-height: 1.7; max-height: 60vh; overflow: auto; }
   .long-details { margin-top: 1rem; font-size: .85rem; color: var(--teamarness-color-text-muted); }

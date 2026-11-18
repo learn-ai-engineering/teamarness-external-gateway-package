@@ -40,10 +40,15 @@ export function notification(name: string) {
   const element = node("section"); element.className = "notification";
   element.setAttribute("aria-label", name); element.setAttribute("aria-live", "polite");
   let dismissed: string | undefined;
+  let previous: string | undefined;
   return {
     element,
     show(key: string, content: readonly HTMLElement[], dismissible = true) {
-      element.replaceChildren(); element.hidden = dismissible && key === dismissed;
+      element.hidden = dismissible && key === dismissed;
+      const observation = JSON.stringify([key, dismissible, content.map(part => part.outerHTML)]);
+      if (previous === observation) return;
+      previous = observation;
+      element.replaceChildren();
       const body = node("div"); body.append(...content); element.append(body);
       if (dismissible) {
         const close = icon(`Dismiss ${name.toLowerCase()}`, "×", () => { dismissed = key; element.hidden = true; });

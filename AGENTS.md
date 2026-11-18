@@ -339,3 +339,27 @@ current association/verifier/private record and saved port, never running state
 or last operation history. Missing bearer needs explicit replacement, endpoint
 mismatch needs publication repair, and tombstones remain denied. Status/watch
 remain historical; no filesystem monitoring, new durable schema or uninstall.
+
+
+Setup simplification Phase 2 uses `setup.inspect` for compact independent CLI,
+current Workspace connection and optional skill presentation. `setup.ts` owns one
+coalesced revision-guarded inspection chain on mount, relevant Policy changes and
+terminal/action observations, never a hash per progress event or filesystem poll.
+Routine named actions internally preview then accept one exact plan; no visible
+Preview/checkbox/Apply ceremony or opaque provenance. Connect/Rotate/skill require
+an issue-free current CLI and an unchanged command plan; they never hide command
+publication or attach a folder to credential actions. Recognized exceptional CLI
+replacement has one short human-version/management confirmation; collisions
+remain refusal. Required command publication in a valid already accepted pending
+Repair uses the same targeted confirmation to avoid a recovery deadlock; only
+Repair can resume those reserved outputs, never the independent CLI action. Install skill… opens the native chooser and selection immediately
+prepares/applies only the skill, holding its lease through acceptance. Cancel and
+stale/unmounted observations never apply; accepted work still outlives the view.
+Current connection facts never come from operation receipts or listener running
+state. Manual token one-time-secret cleanup and explicit denial recovery remain
+available under storage failure. Catalog manual refresh visibly acknowledges each
+admitted click and disables its stable control through the active read terminal;
+polling preserves dismissal, identical notifications retain their dismissal node,
+and errors are never hidden by a success dismissal. No uninstall, Backend/contract,
+SDK, capability, dependency or durable-format change belongs to this UI phase.
+Native/manual and real-Host qualification remain pending.

@@ -25,6 +25,8 @@ export function catalogView(root: HTMLElement, client: Client, mutate: Mutation)
   let offset = 0;
   let nextOffset: number | null = null;
   let tools: readonly Tool[] = [];
+  let manualRevision = 0;
+  let successKey = "refreshed:0";
   const error = node("p"); error.setAttribute("role", "alert");
   const message = notification("Catalog notification");
   message.show("loading", [node("p", "Loading Packages…")], false);
@@ -34,7 +36,9 @@ export function catalogView(root: HTMLElement, client: Client, mutate: Mutation)
   const actions = node("div"); actions.className = "actions";
   const info = node("section"); info.hidden = true;
   info.append(node("p", "All tokens share the same Package and exact tool permissions. Package enable selects no tools; added tools stay off. Writes act as the local Workspace Person. Disable Package removes every saved tool choice, including other pages. This page refreshes every five seconds while open."));
-  actions.append(icon("About shared access", "ⓘ", () => { info.hidden = !info.hidden; }), icon("Refresh available Packages", "↻", () => { void refresh(); }));
+  const refreshButton = icon("Refresh available Packages", "↻", () => { void refresh(true); });
+  const showBusy = () => { refreshButton.disabled = !!active || paused; refreshButton.setAttribute("aria-busy", String(!!active)); };
+  actions.append(icon("About shared access", "ⓘ", () => { info.hidden = !info.hidden; }), refreshButton);
   heading.append(actions);
   const confirmation = node("dialog"); confirmation.setAttribute("aria-label", "Confirm Package disable");
   const closeConfirmation = () => { confirmation.close(); confirmation.replaceChildren(); };
@@ -81,7 +85,6 @@ export function catalogView(root: HTMLElement, client: Client, mutate: Mutation)
         })();
       }, !enabled && allowed.length === 0));
       section.append(heading);
-      if (open && first.provider) section.append(node("p", `Package: ${first.provider}`));
       for (const contract of group) {
         const row = node("section");
         if (open) row.append(node("h4", `${contract.contract} · major ${contract.major}`));
@@ -127,11 +130,13 @@ export function catalogView(root: HTMLElement, client: Client, mutate: Mutation)
     if (active) { queued = true; active.abort(); }
     else void refresh();
   }
-  async function refresh() {
+  async function refresh(manual = false) {
     if (!alive || paused) return;
     if (active) return;
     clearTimeout(timer);
-    const controller = new AbortController(); active = controller;
+    const controller = new AbortController(); active = controller; showBusy();
+    const manualKey = manual ? `refreshed:${++manualRevision}` : undefined;
+    if (manualKey) message.show(`loading:${manualRevision}`, [node("p", "Refreshing Packages…")], false);
     const version = generation;
     const timeout = setTimeout(() => {
       controller.abort();
@@ -156,14 +161,15 @@ export function catalogView(root: HTMLElement, client: Client, mutate: Mutation)
       }
       if (!alive || version !== generation || controller.signal.aborted) return;
       contracts = page.contracts; nextCursor = page.nextCursor; tools = detail.tools; nextOffset = detail.nextOffset;
-      error.textContent = ""; message.show("refreshed", [node("p", "Catalog refreshed. New tools remain off.")]); render();
+      if (manualKey) successKey = manualKey;
+      error.textContent = ""; message.show(successKey, [node("p", "Catalog refreshed. New tools remain off.")]); render();
     } catch (cause) {
       if (alive && version === generation) {
         error.textContent = controller.signal.aborted || isAbortError(cause) ? "Catalog read timed out. Refresh to try again." : describePackageError(cause);
         message.show("unavailable", [node("p", "Catalog unavailable. Displayed choices may be stale.")], false);
       }
     } finally {
-      clearTimeout(timeout); active = undefined;
+      clearTimeout(timeout); active = undefined; showBusy();
       if (alive && !paused) {
         if (queued) { queued = false; void refresh(); }
         else timer = setTimeout(() => { void refresh(); }, POLL_MS);
@@ -172,8 +178,8 @@ export function catalogView(root: HTMLElement, client: Client, mutate: Mutation)
   }
   void refresh();
   return {
-    pause: () => { paused = true; generation++; clearTimeout(timer); clearTimeout(deadline); active?.abort(); },
-    resume: () => { paused = false; if (active) queued = true; else void refresh(); },
+    pause: () => { paused = true; generation++; clearTimeout(timer); clearTimeout(deadline); active?.abort(); showBusy(); },
+    resume: () => { paused = false; showBusy(); if (active) queued = true; else void refresh(); },
     stop: () => { alive = false; generation++; clearTimeout(timer); clearTimeout(deadline); active?.abort(); contracts = []; tools = []; closeConfirmation(); },
   };
 }
