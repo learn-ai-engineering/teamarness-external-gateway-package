@@ -34,3 +34,21 @@ export function icon(name: string, symbol: string, run: () => void, disabled = f
   button.setAttribute("aria-label", name); button.setAttribute("title", name);
   const decoration = node("span", symbol); decoration.setAttribute("aria-hidden", "true"); button.append(decoration); return button;
 }
+
+/** One bounded dismissal key; repeating the same observation cannot reopen it. */
+export function notification(name: string) {
+  const element = node("section"); element.className = "notification";
+  element.setAttribute("aria-label", name); element.setAttribute("aria-live", "polite");
+  let dismissed: string | undefined;
+  return {
+    element,
+    show(key: string, content: readonly HTMLElement[], dismissible = true) {
+      element.replaceChildren(); element.hidden = dismissible && key === dismissed;
+      const body = node("div"); body.append(...content); element.append(body);
+      if (dismissible) {
+        const close = icon(`Dismiss ${name.toLowerCase()}`, "×", () => { dismissed = key; element.hidden = true; });
+        close.className = "icon notification-close"; element.append(close);
+      }
+    },
+  };
+}

@@ -26,6 +26,17 @@ export const PACKAGE_STYLES = `
   button:disabled { cursor: default; opacity: .45; }
   button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--teamarness-color-focus); outline-offset: 3px; }
   .icon { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; font-size: 1.3rem; padding: .3rem; }
+  .heading > .icon { font-size: 1.65rem; }
+  .package-title { display: inline-flex; align-items: center; gap: .5rem; color: var(--teamarness-color-accent); font-size: 1rem; text-align: left; }
+  .package-title > span:first-child { font-size: 1.3rem; }
+  .section-title { justify-content: flex-end; }
+  .notification { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; margin: .75rem 0; }
+  .notification > div { min-width: 0; }
+  .notification-close { border-left: 1px solid var(--teamarness-color-border); flex-shrink: 0; }
+  .setup-button { border: 1px solid var(--teamarness-color-border); border-radius: var(--teamarness-radius-control); padding: .55rem .85rem; margin: .5rem .5rem .5rem 0; }
+  .setup-button.primary { color: var(--teamarness-color-accent); border-color: var(--teamarness-color-accent); }
+  .maintenance { margin-top: .8rem; }
+  .maintenance > section { margin: .8rem 0; }
   .status-toggle { display: inline-flex; align-items: center; gap: .6rem; }
   .status-toggle small { min-width: 3rem; text-align: right; font-size: .78rem; }
   .switch { position: relative; padding: 0; min-width: 32px; width: 32px; height: 18px; border: 1px solid var(--teamarness-color-text-muted); border-radius: 20px; }
@@ -37,8 +48,9 @@ export const PACKAGE_STYLES = `
   .package { border-top: 1px solid var(--teamarness-color-border); padding: .6rem 0; }
   .package:first-child { border: 0; }
   .package-row { min-height: 2.5rem; }
+  .package > section:empty { display: none; }
   .package > section { margin-top: .7rem; }
-  .package > section > p { color: var(--teamarness-color-text-muted); font-size: .8rem; margin: .4rem 0; }
+  .package > p, .package > section > p { color: var(--teamarness-color-text-muted); font-size: .8rem; margin: .4rem 0; }
   .package > section > div { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .6rem; padding: .6rem 0; border-top: 1px solid var(--teamarness-color-border); }
   .package > section > div > p { font-size: .75rem; color: var(--teamarness-color-text-muted); }
   .package strong { font-size: .75rem; font-weight: 500; color: var(--teamarness-color-text-muted); }

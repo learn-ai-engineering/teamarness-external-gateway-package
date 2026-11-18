@@ -40,7 +40,7 @@ export function mount(context: PackageMountContext): PackageUnmount {
   const guidance = node("details"); guidance.className = "long-details";
   guidance.append(node("summary", "External-agent onboarding"), node("p", "Person-selected · Person-authorized access. Supply a token separately through your client's local secret mechanism. Save these instructions without credentials."), node("pre", onboarding)); content.append(guidance);
   stopView = () => { shared.stop(); setup.stop(); mounted?.stop(); };
-  updateView = value => { shared.update(value); mounted?.update(value); };
+  updateView = value => { shared.update(value); setup.update(value); mounted?.update(value); };
   function refreshStatus() {
     const requestedRevision = ++revision;
     void client.request("external-gateway.status.get", {}, { signal: pending.signal }).then(value => {

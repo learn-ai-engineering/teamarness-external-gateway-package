@@ -116,17 +116,17 @@ const tool: Tool = { port: "read.one", fingerprint: "a".repeat(64), eligible: tr
 describe("Bounded catalog settings", () => {
   it("groups contracts, selects exact tools, keeps new tools off and explains missing/unavailable choices", async () => {
     let enabled = false;
-    const rows = [contract, { ...contract, contract: "dev.example.beta" }, { ...contract, contract: "dev.example.missing", provider: "dev.example.guide-less", guideEligibility: "missing" }, { ...contract, contract: "dev.teamarness.conversations", provider: "dev.teamarness.conversations" }, { ...contract, contract: "dev.example.gone", provider: null, displayName: null, available: false, hostEnabled: true, guideEligibility: "unavailable" }];
+    const rows = [contract, { ...contract, contract: "dev.example.beta" }, { ...contract, contract: "dev.example.missing", provider: "dev.example.guide-less", guideEligibility: "missing" }, { ...contract, contract: "dev.teamarness.conversations", provider: "dev.teamarness.conversations", displayName: "Conversations" }, { ...contract, contract: "dev.example.gone", provider: null, displayName: null, available: false, hostEnabled: true, guideEligibility: "unavailable" }];
     const client = fake({
       "external-gateway.catalog.page": (p: { contract?: string }) => p.contract ? { ...emptyPage, tools: [tool, { ...tool, port: "read.new" }, { ...tool, port: "read.changed", selected: true, reviewRequired: true }, { ...tool, port: "runtime.guide", eligible: false }, { ...tool, port: "write.one", kind: "command" }, { ...tool, port: "watch.one", delivery: "stream" }, { ...tool, port: "events.one", kind: "event", delivery: "stream" }] } : { ...emptyPage, contracts: rows.map(c => ({ ...c, selected: enabled && c.selected, hostEnabled: enabled && c.hostEnabled })) },
       "external-gateway.package.set": () => { enabled = true; return { ok: true, warning: null }; },
       "external-gateway.tool.set": () => ({ ok: true, warning: null }),
     });
     const root = setup(client, "settings"); await flush();
-    expect(root.textContent).toContain("Missing runtime guide"); expect(button(root, "Tools · dev.teamarness.conversations").disabled).toBe(true);
+    expect(root.textContent).toContain("Missing runtime guide"); expect(button(root, "Show Conversations tools").disabled).toBe(true);
     field(root, "Enable Multi access").click(); await flush();
     expect(client.calls).toContainEqual({ operation: "external-gateway.package.set", payload: { provider: "dev.example.multi", enabled: true, contracts: [{ contract: "dev.example.alpha", major: 1 }, { contract: "dev.example.beta", major: 1 }] } });
-    button(root, "Tools · dev.example.alpha").click(); await flush();
+    expect(button(root, "Hide Multi tools").attributes.get("aria-expanded")).toBe("true");
     expect(button(root, "Enable read read.new").disabled).toBe(false);
     expect(root.textContent).toContain("Review required"); expect(root.textContent).toContain("Guide included automatically");
     expect(button(root, "Enable write write.one").disabled).toBe(false);
@@ -142,7 +142,7 @@ describe("Bounded catalog settings", () => {
     button(root, "Enable streaming query watch.one").click(); await flush();
     button(root, "Enable event events.one").click(); await flush();
     expect(client.calls.filter(c => c.operation === "external-gateway.tool.set")).toEqual(["read.one", "write.one", "watch.one", "events.one"].map(port => ({ operation: "external-gateway.tool.set", payload: { contract: "dev.example.alpha", major: 1, provider: "dev.example.multi", port, fingerprint: "a".repeat(64), enabled: true } })));
-    button(root, "Remove unavailable · dev.example.gone").click(); button(root, "Disable Package").click(); await flush();
+    button(root, "Remove unavailable choices").click(); button(root, "Disable Package").click(); await flush();
     expect(client.calls).toContainEqual({ operation: "external-gateway.package.set", payload: { provider: null, enabled: false, contracts: [{ contract: "dev.example.gone", major: 1 }] } });
   });
   it("paginates without accumulating catalog, polls the mounted body, and cancels/discards a stale refresh before mutation", async () => {
@@ -157,6 +157,7 @@ describe("Bounded catalog settings", () => {
     });
     const root = setup(client, "settings"); await flush();
     button(root, "Next contracts").click(); await flush();
+    button(root, "Show Multi tools").click(); await flush();
     expect(root.textContent).toContain("dev.example.next"); expect(root.textContent).not.toContain("dev.example.alpha");
     button(root, "First contracts").click(); await flush(); hold = true;
     await vi.advanceTimersByTimeAsync(5000); await flush();
@@ -184,7 +185,7 @@ describe("Bounded catalog settings", () => {
     const before = client.calls.length; field(root, "Refresh available Packages").click(); await flush();
     expect(client.calls.length - before).toBe(2); expect(root.textContent).toContain("port_catalog_changed");
     stale = false; field(root, "Refresh available Packages").click(); await flush();
-    button(root, "Tools · dev.example.alpha").click(); await flush(); await unmount?.();
+    button(root, "Show Multi tools").click(); await flush(); await unmount?.();
     expect(signal?.aborted).toBe(true); expect(vi.getTimerCount()).toBe(0); pending.resolve(emptyPage); await flush(); expect(root.children).toHaveLength(0);
   });
 });
@@ -199,7 +200,7 @@ describe("Catalog and secret lifetime boundaries", () => {
       return { ...emptyPage, contracts: [contract] };
     } });
     const root = setup(client, "settings"); await flush();
-    button(root, "Tools · dev.example.alpha").click(); await flush();
+    button(root, "Show Multi tools").click(); await flush();
     button(root, "Next tools").click(); await flush();
     expect(root.textContent).toContain("read.last"); expect(root.textContent).not.toContain("read.first");
     const count = client.calls.length; pendingRead = true;
@@ -230,8 +231,8 @@ describe("Catalog navigation freshness", () => {
       return { ...emptyPage, contracts: [contract, { ...contract, contract: "dev.example.beta" }] };
     } });
     const root = setup(client, "settings"); await flush();
-    button(root, "Tools · dev.example.alpha").click(); await flush();
-    const before = client.calls.length; button(root, "Tools · dev.example.beta").click(); await flush();
+    button(root, "Show Multi tools").click(); await flush();
+    const before = client.calls.length; button(root, "Show contract · dev.example.beta").click(); await flush();
     expect(signal?.aborted).toBe(true); expect(client.calls).toHaveLength(before);
     pending.resolve({ ...emptyPage, tools: [{ ...tool, port: "read.stale" }] }); await flush();
     expect(root.textContent).not.toContain("read.stale"); expect(root.textContent).toContain("read.beta");
@@ -293,11 +294,11 @@ describe("Revised A mount-owned controls", () => {
   it("refuses disabled expansion and confirms destructive Package removal with exact contracts", async () => {
     let enabled = false;
     const client = fake({ "external-gateway.catalog.page": () => ({ ...emptyPage, contracts: [{ ...contract, selected: enabled, hostEnabled: enabled }] }), "external-gateway.package.set": (p: { enabled: boolean }) => { enabled = p.enabled; return { ok: true, warning: null }; } });
-    const root = setup(client); await flush(); expect(button(root, "Tools · dev.example.alpha").disabled).toBe(true);
-    button(root, "Tools · dev.example.alpha").click(); expect(client.calls.filter(c => c.operation === "external-gateway.catalog.page")).toHaveLength(1);
+    const root = setup(client); await flush(); expect(button(root, "Show Multi tools").disabled).toBe(true);
+    button(root, "Show Multi tools").click(); expect(client.calls.filter(c => c.operation === "external-gateway.catalog.page")).toHaveLength(1);
     field(root, "Enable Multi access").click(); await flush();
     expect(client.calls.filter(c => c.operation === "external-gateway.package.set")).toEqual([{ operation: "external-gateway.package.set", payload: { provider: "dev.example.multi", enabled: true, contracts: [{ contract: "dev.example.alpha", major: 1 }] } }]);
-    expect(button(root, "Tools · dev.example.alpha").disabled).toBe(false); field(root, "Enable Multi access").click();
+    expect(button(root, "Hide Multi tools").disabled).toBe(false); field(root, "Enable Multi access").click();
     expect(root.textContent).toContain("Re-enabling does not restore"); expect(client.calls.filter(c => c.operation === "external-gateway.package.set")).toHaveLength(1);
     button(root, "Cancel disable").click(); field(root, "Enable Multi access").click(); button(root, "Disable Package").click(); await flush();
     expect(client.calls.filter(c => c.operation === "external-gateway.package.set").at(-1)).toEqual({ operation: "external-gateway.package.set", payload: { provider: "dev.example.multi", enabled: false, contracts: [{ contract: "dev.example.alpha", major: 1 }] } });
@@ -317,7 +318,7 @@ it("retains stale Host review, exact schema re-approval and mixed-Provider contr
   const changed = { ...tool, selected: true, reviewRequired: true };
   const client = fake({ "external-gateway.catalog.page": (p: { contract?: string }) => p.contract ? { ...emptyPage, tools: [changed] } : { ...emptyPage, contracts: [stale, off] }, "external-gateway.package.set": () => ({ ok: true, warning: null }), "external-gateway.tool.set": () => ({ ok: true, warning: null }) });
   const root = setup(client); await flush();
-  expect(root.textContent).toContain("Host selection missing"); button(root, "Tools · dev.example.alpha").click(); await flush();
+  expect(root.textContent).toContain("Host selection missing"); button(root, "Show Multi tools").click(); await flush();
   expect(client.calls.filter(c => c.operation === "external-gateway.catalog.page" && (c.payload as { contract?: string }).contract)).toHaveLength(0);
   button(root, "Enable contract · dev.example.new").click(); await flush();
   button(root, "Review access · dev.example.alpha").click(); await flush();
@@ -327,7 +328,7 @@ it("retains stale Host review, exact schema re-approval and mixed-Provider contr
   ]);
   await unmount?.();
   const reviewed = fake({ "external-gateway.catalog.page": (p: { contract?: string }) => p.contract ? { ...emptyPage, tools: [changed] } : { ...emptyPage, contracts: [contract] }, "external-gateway.tool.set": () => ({ ok: true, warning: null }) });
-  const next = setup(reviewed); await flush(); button(next, "Tools · dev.example.alpha").click(); await flush();
+  const next = setup(reviewed); await flush(); button(next, "Show Multi tools").click(); await flush();
   expect(button(next, "Review and enable read read.one").attributes.get("aria-checked")).toBe("false"); button(next, "Review and enable read read.one").click(); await flush();
   expect(reviewed.calls.filter(c => c.operation === "external-gateway.tool.set")).toEqual([{ operation: "external-gateway.tool.set", payload: { contract: "dev.example.alpha", major: 1, provider: "dev.example.multi", port: "read.one", fingerprint: "a".repeat(64), enabled: true } }]);
 });
@@ -383,4 +384,67 @@ it("allows manual and managed revoke but not creation or rotation while storage 
     { operation: "external-gateway.token.revoke", payload: { id: "manual" } },
     { operation: "external-gateway.token.revoke", payload: { id: "managed" } },
   ]);
+});
+
+it("uses the Package title chevron, expands only after successful enable, and collapses identifiers", async () => {
+  let enabled = false; let fail = true;
+  const client = fake({
+    "external-gateway.catalog.page": (p: { contract?: string }) => p.contract ? { ...emptyPage, tools: [tool] } : { ...emptyPage, contracts: [{ ...contract, selected: enabled, hostEnabled: enabled }] },
+    "external-gateway.package.set": () => { if (fail) throw createPackageRequestError({ packageError: { code: "external_gateway.storage_failed" } }); enabled = true; return { ok: true, warning: null }; },
+  });
+  const root = setup(client); await flush();
+  expect(field(root, "Show Multi tools").disabled).toBe(true);
+  expect(root.textContent).not.toContain("dev.example.alpha"); expect(root.textContent).not.toContain("Shared by every connection");
+  field(root, "Enable Multi access").click(); await flush(); expect(root.textContent).not.toContain("dev.example.alpha");
+  fail = false; field(root, "Enable Multi access").click(); await flush();
+  expect(field(root, "Hide Multi tools").attributes.get("aria-expanded")).toBe("true");
+  expect(root.textContent).toContain("dev.example.alpha · major 1"); expect(root.textContent).toContain("read.one");
+  expect(field(root, "Enable read read.one").attributes.get("aria-checked")).toBe("false");
+  expect(client.calls.filter(c => c.operation === "external-gateway.tool.set")).toHaveLength(0);
+  field(root, "Hide Multi tools").click(); await flush(); expect(root.textContent).not.toContain("dev.example.alpha"); expect(root.textContent).not.toContain("major 1");
+  field(root, "Show Multi tools").click(); await flush(); expect(root.textContent).toContain("read.one");
+});
+
+it("keeps a dismissed catalog success dismissed during polling while failures remain visible", async () => {
+  vi.useFakeTimers(); let fail = false;
+  const client = fake({ "external-gateway.catalog.page": () => { if (fail) throw createPackageRequestError({ packageError: { code: "external_gateway.unavailable" } }); return emptyPage; } });
+  const root = setup(client); await flush(); button(root, "Dismiss catalog notification").click();
+  await vi.advanceTimersByTimeAsync(15000); await flush(); expect(field(root, "Catalog notification").hidden).toBe(true);
+  fail = true; await vi.advanceTimersByTimeAsync(5000); await flush(); expect(root.textContent).toContain("external_gateway.unavailable");
+  expect(field(root, "Catalog notification").hidden).toBe(false);
+  expect(client.calls.some(c => c.operation === "external-gateway.listener.set")).toBe(false);
+});
+
+it.each(["main", "settings"] as const)("uses existing managed-token status after a skill-only receipt in %s without offering connect", async view => {
+  const client = fake({
+    "external-gateway.status.get": () => ({ ...status, tokens: [{ id: "managed", label: "Managed CLI", generation: 1, managed: true }] }),
+    "external-gateway.setup.status": () => ({ operationId: "last-skill", intent: "install-skill", phase: "complete", command: "installed", skill: "installed", access: "unchanged", error: null, commandPath: null, skillPath: null }),
+  });
+  const root = setup(client, view); await flush();
+  expect(root.textContent).toContain("another folder"); expect(root.all().some(e => e.tagName === "button" && e.textContent === "Preview connect")).toBe(false);
+  expect(button(root, "Preview skill install").disabled).toBe(true);
+  expect(client.calls.some(c => c.operation === "external-gateway.setup.preview" || c.operation === "external-gateway.setup.apply")).toBe(false);
+});
+
+it("keeps fallback identities and stale-review contract IDs inside expanded content", async () => {
+  const client = fake({ "external-gateway.catalog.page": () => ({ ...emptyPage, contracts: [{ ...contract, displayName: null, hostEnabled: false }] }) });
+  const root = setup(client); await flush();
+  expect(root.textContent).not.toContain(contract.provider); expect(root.textContent).not.toContain(contract.contract);
+  expect(root.textContent).toContain("Host selection missing");
+  field(root, "Show Unnamed Package tools").click(); await flush();
+  expect(root.textContent).toContain(contract.provider); expect(root.textContent).toContain(`${contract.contract} · major 1`);
+  expect(button(root, `Review access · ${contract.contract}`).disabled).toBe(false);
+});
+
+it("does not offer Connect before a delayed managed-token status resolves after a skill-only receipt", async () => {
+  const policyStatus = deferred<Status>();
+  const client = fake({
+    "external-gateway.status.get": () => policyStatus.promise,
+    "external-gateway.setup.status": () => ({ operationId: "last-skill", intent: "install-skill", phase: "complete", command: "installed", skill: "installed", access: "unchanged", error: null, commandPath: null, skillPath: null }),
+  });
+  const root = setup(client); await flush();
+  expect(button(root, "Preview connect").disabled).toBe(true); button(root, "Preview connect").click(); await flush();
+  expect(client.calls.some(c => c.operation === "external-gateway.setup.preview")).toBe(false);
+  policyStatus.resolve({ ...status, tokens: [{ id: "managed", label: "Managed CLI", generation: 1, managed: true }] }); await flush();
+  expect(root.all().some(e => e.tagName === "button" && e.textContent === "Preview connect")).toBe(false);
 });

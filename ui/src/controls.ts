@@ -13,16 +13,17 @@ export function controls(root: HTMLElement, client: Client, refreshStatus: () =>
   const packages = group(root, "Packages"); const catalog = node("fieldset"); packages.append(catalog);
   const error = node("p"); error.setAttribute("role", "alert"); listener.append(error);
   const mutate = async <K extends "external-gateway.listener.set" | "external-gateway.package.set" | "external-gateway.tool.set">(operation: K, payload: Requests[K]["request"]) => {
-    if (!alive || busy) return;
+    if (!alive || busy) return false;
     busy = true; catalog.disabled = true; catalogMount.pause(); error.textContent = "";
     if (operation === "external-gateway.listener.set") dismissedBind = false;
     if (status) render(status);
     try {
       const response = await client.request(operation, payload, { signal: pending.signal });
-      if (!alive) return;
+      if (!alive) return false;
       if (response.warning) error.textContent = response.warning;
       refreshStatus();
-    } catch (cause) { if (alive && !isAbortError(cause)) error.textContent = describePackageError(cause); }
+      return response.ok;
+    } catch (cause) { if (alive && !isAbortError(cause)) error.textContent = describePackageError(cause); return false; }
     finally { busy = false; if (alive) { catalog.disabled = !!status?.storageFailed; catalogMount.resume(); if (status) render(status); } }
   };
   const catalogMount = catalogView(catalog, client, mutate);
