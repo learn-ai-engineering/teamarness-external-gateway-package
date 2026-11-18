@@ -7,7 +7,7 @@ use std::{
     fs,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -561,5 +561,97 @@ async fn separate_profiles_contend_on_installer_not_private_credential_owner() {
     tx.send(()).unwrap();
     assert_eq!(finish(&mut h).await["phase"], "complete");
     assert!(f.connections().is_empty());
+    h.shutdown().await.unwrap();
+}
+
+struct PersistentReceiptFault {
+    enabled: AtomicBool,
+    failures: AtomicUsize,
+}
+impl InstallFault for PersistentReceiptFault {
+    fn before(&self, at: Boundary) -> std::io::Result<()> {
+        if at == Boundary::ReceiptWrite && self.enabled.load(Ordering::SeqCst) {
+            self.failures.fetch_add(1, Ordering::SeqCst);
+            Err(std::io::Error::other("persistent private receipt fault"))
+        } else {
+            Ok(())
+        }
+    }
+}
+#[tokio::test]
+async fn published_command_with_missing_receipt_requires_reload_not_unusable_update() {
+    published_command_with_pending_receipt(false).await;
+}
+#[tokio::test]
+async fn published_command_with_old_receipt_requires_reload_not_unusable_update() {
+    published_command_with_pending_receipt(true).await;
+}
+async fn published_command_with_pending_receipt(old_receipt: bool) {
+    let f = Fixture::new();
+    let receipt = root(&f).join("managed/command.receipt");
+    let before = if old_receipt {
+        let (mut h, _) = f.start().await;
+        assert_eq!(apply(&mut h, "install-cli").await["phase"], "complete");
+        h.shutdown().await.unwrap();
+        let bytes = fs::read(&receipt).unwrap();
+        fs::write(&f.source, b"changed admitted fixture build").unwrap();
+        Some(bytes)
+    } else {
+        None
+    };
+    let fault = Arc::new(PersistentReceiptFault {
+        enabled: AtomicBool::new(true),
+        failures: AtomicUsize::new(0),
+    });
+    let mut e = f.environment();
+    e.install_fault = Some(fault.clone());
+    e.client_fault = Some(Arc::new(NoCredentialEffects));
+    e.setup_fault = Some(Arc::new(NoCredentialEffects));
+    let (mut h, s) = f.start_with(e).await;
+    assert_eq!(
+        apply(&mut h, "install-cli").await["phase"],
+        "repair-required"
+    );
+    assert_eq!(
+        fs::read(f.home.path().join(".local/bin/tmx")).unwrap(),
+        fs::read(&f.source).unwrap()
+    );
+    assert_eq!(fs::read(&receipt).ok(), before);
+    assert!(fault.failures.load(Ordering::SeqCst) >= 2);
+    let journal = root(&f).join("managed/command.journal");
+    let journal_before = fs::read(&journal).unwrap();
+    // Fault survived both owned apply and immediate recovery. Storage now recovers,
+    // but read-only inspection must not reconcile or advertise an unusable preview.
+    fault.enabled.store(false, Ordering::SeqCst);
+    let fact = h
+        .request("external-gateway.setup.inspect", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(fact["cli"]["state"], "installed");
+    assert_eq!(fact["cli"]["issue"], "external_gateway.reload_required");
+    assert_eq!(fs::read(&receipt).ok(), before);
+    assert_eq!(
+        h.request(
+            "external-gateway.setup.preview",
+            json!({"intent":"install-cli"})
+        )
+        .await
+        .unwrap_err()
+        .code(),
+        "external_gateway.output_collision"
+    );
+    assert_eq!(fs::read(&journal).unwrap(), journal_before);
+    assert!(f.connections().is_empty());
+    assert!(!f.data.path().join("config/origin").exists());
+    h.shutdown().await.unwrap();
+    drop(s);
+    let (mut h, _) = f.start().await;
+    let fact = h
+        .request("external-gateway.setup.inspect", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(fact["cli"]["change"], "none");
+    assert!(fact["cli"]["issue"].is_null());
+    assert!(!root(&f).join("managed/command.journal").exists());
     h.shutdown().await.unwrap();
 }

@@ -15,7 +15,10 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
   section.append(choices, destination, confirmation, activity, progress.element, error); root.append(section);
   const pending = new AbortController();
   let alive = true; let busy = false; let observing = false; let submitting = false;
-  let submissionStatusRevision = 0;
+  // Local submission ownership is not operation history: idle/old watch values cannot settle it.
+  let submission: { intent: SetupIntent; resumeIntent?: SetupIntent; previousOperationId: string | null; previousStatusKey?: string; operationId?: string; terminal?: SetupStatus; settled: boolean } | undefined;
+  let latestStatus: SetupStatus | undefined;
+  let presentationKey: string | undefined;
   let facts: SetupInspection | undefined; let inspectionFailed = false; let policy: Status | undefined;
   let policyKey: string | undefined; let statusKey: string | undefined; let statusRevision = 0;
   let inspectRevision = 0; let inspectedRevision = -1; let inspection: Promise<void> | undefined;
@@ -26,7 +29,7 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
 
   const issueText = (code: string | null, output: "command" | "skill" = "command") => {
     switch (code) {
-      case "external_gateway.reload_required": return "Reload the Package before continuing; the available CLI source changed.";
+      case "external_gateway.reload_required": return "Restore storage if needed, then Reload the Package before continuing CLI setup.";
       case "external_gateway.output_collision":
       case "external_gateway.output_unsafe":
       case "external_gateway.output_state_invalid": return output === "skill" ? "The selected skill output is unrecognized, modified or unsafe. Choose another folder or resolve that output outside setup; it cannot be replaced here." : "The CLI target is unrecognized, modified or unsafe. Inspect the command target under Command path and resolve the collision outside setup; it cannot be replaced here.";
@@ -35,7 +38,7 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
       case "external_gateway.setup_state_invalid": return "Local connection information is unavailable or invalid. It has not been changed. Resolve the private client state before trying again.";
       case "external_gateway.credential_consent_required": return "Credentials are missing or no longer match. Use Rotate credentials to explicitly replace them.";
       case "external_gateway.publication_required": return "Repair the saved connection endpoint; intact credentials will be retained.";
-      case "external_gateway.storage_failed": return "Storage failed. Access is closed. Restore storage, then use Configuration to revoke a token or Disable and revoke all tokens again.";
+      case "external_gateway.storage_failed": return "Saved connection state could not be verified. Access may still be active. Check storage; use Configuration to revoke a token or Disable and revoke all tokens if needed.";
       case "external_gateway.output_storage_failed": return "The output could not be saved completely. Check storage and current installation status before trying again; partial files may remain.";
       case "external_gateway.setup_preview_stale": return "Setup changed before acceptance. Check the current status and choose the action again; nothing is retried automatically.";
       case "external_gateway.listener_required": return "Start the gateway listener on its saved port before connecting, rotating or repairing credentials.";
@@ -57,7 +60,8 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
     error.textContent = issueText(describePackageError(cause), output) ?? "Setup could not finish. Check the Package and current setup status before choosing the action again.";
   };
   const cliReady = () => facts?.cli.state === "installed" && facts.cli.change === "none" && facts.cli.issue === null;
-  const blocked = () => busy || observing || picking || !!confirmPlan;
+  const unsettled = () => !!submission && !submission.settled;
+  const blocked = () => busy || observing || unsettled() || picking || !!confirmPlan;
   const usable = () => !!facts && facts.connection.state !== "conflict" && facts.connection.state !== "unavailable" && facts.recovery.state !== "invalid" && !policy?.storageFailed;
   const canRun = (intent: SetupIntent) => {
     if (!facts) return false;
@@ -73,6 +77,9 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
   };
   function render() {
     if (!alive) return;
+    const key = JSON.stringify([facts, inspectionFailed, policy?.running, policy?.storageFailed, busy, observing, unsettled(), picking, selection, submitting, !!confirmPlan]);
+    if (presentationKey === key) return;
+    presentationKey = key;
     choices.replaceChildren(); destination.replaceChildren();
     const cli = node("section"); const connection = node("section"); const skill = node("section");
     cli.className = connection.className = skill.className = "setup-part";
@@ -111,7 +118,7 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
       destination.append(node("p", selection ? `Installing skill in ${selection.path}…` : "Choose a folder in the native dialog. Cancelling installs nothing."));
       if (!submitting) destination.append(action("Cancel folder selection", () => { actionRevision++; closePicker(); busy = false; activity.textContent = ""; render(); }));
     }
-    choices.disabled = busy || observing;
+    choices.disabled = busy || observing || unsettled();
   }
   function closePicker() {
     pickerRevision++; picking = false; selection = undefined;
@@ -155,24 +162,25 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
   async function applyPlan(plan: Preview["response"], revision: number) {
     if (!alive || revision !== actionRevision) return;
     submitting = true; clearConfirmation(); render();
-    const observed = statusRevision; submissionStatusRevision = observed;
+    const local: NonNullable<typeof submission> = { intent: plan.intent, resumeIntent: plan.intent === "repair" ? facts?.recovery.intent ?? undefined : undefined, previousOperationId: latestStatus?.operationId ?? null, previousStatusKey: statusKey, settled: false };
+    submission = local; statusRevision++;
     try {
-      await client.request("external-gateway.setup.apply", { planId: plan.planId }, { signal: pending.signal });
+      const accepted = await client.request("external-gateway.setup.apply", { planId: plan.planId }, { signal: pending.signal });
       if (!alive || revision !== actionRevision) return;
       closePicker();
-      if (observed === statusRevision) {
-        statusRevision++; observing = true;
-        progress.show("accepted", [node("p", "Accepted. Waiting for completion; closing this view does not cancel accepted work.")], false);
+      local.operationId = accepted.operationId;
+      if (!local.settled) {
+        if (local.terminal?.operationId === accepted.operationId) showStatus(local.terminal);
+        if (!local.settled) progress.show("accepted", [node("p", "Accepted. Waiting for completion; closing this view does not cancel accepted work.")], false);
       }
       refreshPolicy(); invalidate();
     } catch (cause) {
       if (alive && revision === actionRevision) {
         closePicker();
-        if (observed === statusRevision) {
+        if (!local.settled) {
           if (!packageErrorCode(cause) && !isAbortError(cause)) {
-            statusRevision++; observing = true;
             progress.show("acceptance-unknown", [node("p", "Acceptance could not be confirmed. Accepted work may still continue. Wait for setup updates or reopen this view before starting another action.")], false);
-          } else fail(cause);
+          } else { local.settled = true; observing = false; fail(cause); }
         }
         invalidate();
       }
@@ -180,7 +188,7 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
     finally { if (alive && revision === actionRevision) { busy = false; submitting = false; render(); } }
   }
   async function runIntent(intent: SetupIntent, selectedRevision?: number) {
-    if (!alive || busy || observing || confirmPlan || (picking && intent !== "install-skill")) return;
+    if (!alive || busy || observing || unsettled() || confirmPlan || (picking && intent !== "install-skill")) return;
     if (!canRun(intent) && !(intent === "install-skill" && selection)) return;
     const selected = intent === "install-skill" ? selection : undefined;
     if (intent === "install-skill" && (!selected || selectedRevision !== pickerRevision)) return;
@@ -214,7 +222,7 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
         const explanation = !installed ? `Publish the required CLI version ${proposed.version}.` : installed.installation !== proposed.installation ? `Transfer management of the recognized CLI from another app profile to this one, replacing version ${installed.version} with version ${proposed.version}.` : installed.version !== proposed.version ? `Replace the recognized CLI version ${installed.version} with version ${proposed.version}.` : installed.sha256 !== proposed.sha256 ? `Replace the recognized CLI with a different build of version ${proposed.version}.` : `Finish the recognized CLI publication for version ${proposed.version}.`;
         const consequence = pendingCommandRepair ? value.credentialChange ? "Resume the previously accepted credential changes and any selected outputs." : value.skillChange !== "not-requested" ? "Resume the previously accepted skill output; credentials are unchanged." : "Resume the previously accepted outputs; credentials are unchanged." : "Credentials and skills are unchanged.";
         confirmation.replaceChildren(node("h3", pendingCommandRepair ? "Resume unfinished setup?" : "Update recognized CLI?"), node("p", `${explanation} ${consequence}`), action(pendingCommandRepair ? "Cancel repair" : "Cancel CLI update", () => { actionRevision++; clearConfirmation(); render(); }), action(pendingCommandRepair ? "Confirm repair" : "Confirm CLI update", () => {
-          if (!confirmPlan || busy || observing) return;
+          if (!confirmPlan || busy || observing || unsettled()) return;
           const exact = confirmPlan; busy = true; void applyPlan(exact, revision);
         }));
         return;
@@ -236,7 +244,7 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
     const installSelected = () => {
       if (!alive || revision !== pickerRevision || !picker || !selection) return;
       picking = false;
-      if (busy || observing || confirmPlan) { closePicker(); error.textContent = "Another setup action started. Wait for it to finish, then choose the skill folder again."; render(); return; }
+      if (busy || observing || unsettled() || confirmPlan) { closePicker(); error.textContent = "Another setup action started. Wait for it to finish, then choose the skill folder again."; render(); return; }
       void runIntent("install-skill", revision);
     };
     try {
@@ -246,10 +254,10 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
         else { closePicker(); render(); }
       }, { onTerminated: cause => {
         if (!alive || revision !== pickerRevision) return;
-        actionRevision++; closePicker(); busy = false; activity.textContent = "";
         const wasSubmitting = submitting;
-        const awaitingAcceptance = wasSubmitting && submissionStatusRevision === statusRevision;
-        if (awaitingAcceptance) observing = true;
+        if (!wasSubmitting) actionRevision++;
+        closePicker(); busy = false; activity.textContent = "";
+        const awaitingAcceptance = wasSubmitting && unsettled();
         submitting = false; render();
         if (awaitingAcceptance) error.textContent = "Folder selection ended while acceptance was pending. Completion is unknown; check setup updates or reopen this view before starting another action.";
         else if (!wasSubmitting) { if (cause) fail(cause); else error.textContent = "Folder selection ended. Choose again."; }
@@ -259,8 +267,24 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
     } catch (cause) { if (alive && revision === pickerRevision) { closePicker(); render(); fail(cause); } }
   }
   function showStatus(value: SetupStatus) {
-    observing = ["accepted", "prepared", "outputs", "committed"].includes(value.phase);
+    const active = ["accepted", "prepared", "outputs", "committed"].includes(value.phase);
     const key = JSON.stringify(value);
+    if (unsettled()) {
+      const local = submission!;
+      if (value.phase === "idle" || !value.operationId || !active && key === local.previousStatusKey) return;
+      if (!local.operationId) {
+        if (value.intent !== local.intent && value.intent !== local.resumeIntent) return;
+        if (!active) { local.terminal = value; return; } // A late apply reply may confirm this exact terminal.
+        if (value.operationId === local.previousOperationId && !local.resumeIntent) return;
+        local.operationId = value.operationId;
+      }
+      if (value.operationId !== local.operationId) return;
+      // Repair reuses the original ID and may publish the original intent after acceptance.
+      if (active) local.previousStatusKey = undefined;
+      else { local.settled = true; error.textContent = ""; }
+    }
+    latestStatus = value;
+    observing = active;
     if (value.phase !== "idle") {
       const text = observing ? "Setup is in progress. Accepted work continues if this view closes." : value.phase === "complete" ? value.intent === "install-cli" ? "CLI installation completed." : value.intent === "install-skill" ? "Skill installation completed." : value.intent === "disconnect" ? "Disconnection completed." : value.intent === "rotate" ? "Credential rotation completed." : value.intent === "repair" ? "Connection repair completed." : "Connection completed." : value.phase === "cleanup-pending" ? "Access was revoked; local cleanup still needs Repair." : "Setup did not finish. Check the current facts and repair options; completed outputs may remain.";
       progress.show(key, [node("p", text), ...(value.error ? [node("p", issueText(value.error, value.command === "installed" && value.skill === "pending" ? "skill" : "command") ?? "Setup needs attention. Check current status before trying again.")] : [])], value.phase === "complete" && !value.error);

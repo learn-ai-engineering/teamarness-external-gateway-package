@@ -539,6 +539,8 @@ impl CommandPlan {
 pub struct CommandObservation {
     pub version: Option<String>,
     pub pending: bool,
+    /// New bytes are already published; finish via owned recovery, not another ordinary preview.
+    pub published_pending: bool,
 }
 /// This object has no authorization methods. Construction/preview never creates a directory.
 pub struct ManagedInstaller {
@@ -617,6 +619,7 @@ impl ManagedInstaller {
         let receipt = self.state_path().join(COMMAND_RECEIPT);
         let state = Pin::capture(&self.state_path())?;
         let pending = pending_journal(&state, "command.journal")?;
+        let mut published_pending = false;
         let installed = if let Some(bytes) = &pending {
             let j: Journal = parse(bytes)?;
             if j.kind != Kind::Command || j.output != output || j.receipt != receipt {
@@ -631,6 +634,7 @@ impl ManagedInstaller {
                 if current != j.old_receipt && current.as_ref() != Some(&j.new_receipt) {
                     return Err(InstallError::Collision);
                 }
+                published_pending = true;
                 Some(j.new_receipt)
             } else if actual == j.old_digest {
                 ensure_old(&j)?;
@@ -647,6 +651,7 @@ impl ManagedInstaller {
         Ok(CommandObservation {
             version,
             pending: pending.is_some(),
+            published_pending,
         })
     }
     pub fn preview(&self, source: &Path, admission: Admitted) -> Result<CommandPlan> {

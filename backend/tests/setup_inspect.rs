@@ -653,3 +653,30 @@ async fn cli_only_plans_keep_capacity_expiry_and_exact_source_rechecks() {
     assert!(files(f.home.path()).is_empty());
     h.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn invalid_origin_inspection_is_unavailable_without_denying_existing_policy_access() {
+    let f = Fixture::new();
+    let (mut h, s) = f.start().await;
+    connect(&mut h).await;
+    let c = f.connections().remove(0);
+    assert!(s.policy.authenticate(&c.bearer).await.is_ok());
+    fs::write(f.data.path().join("config/origin"), b"invalid-origin").unwrap();
+    let home = files(f.home.path());
+    let data = files(f.data.path());
+    let fact = inspect(&mut h).await;
+    assert_eq!(
+        fact["connection"],
+        json!({"state":"unavailable", "authority":"current", "repair":"none", "issue":"external_gateway.storage_failed"})
+    );
+    let status = h
+        .request("external-gateway.status.get", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(status["running"], true);
+    assert_eq!(status["storageFailed"], false);
+    assert!(s.policy.authenticate(&c.bearer).await.is_ok());
+    assert_eq!(files(f.home.path()), home);
+    assert_eq!(files(f.data.path()), data);
+    h.shutdown().await.unwrap();
+}

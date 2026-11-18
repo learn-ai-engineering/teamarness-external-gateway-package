@@ -185,9 +185,11 @@ it("does not let a late initial idle observation reopen actions after acceptance
   initial.resolve(idle); await flush(); expect(root.textContent).toContain("Accepted"); expect(button(root, "Connect").disabled).toBe(true); expect(calls(client, "apply")).toHaveLength(1); view.stop();
 });
 
-it("does not re-offer an action when Host acceptance is uncertain without a terminal observation", async () => {
+it("does not re-offer an action when Host acceptance is uncertain without a correlated terminal observation", async () => {
   const client = fake({ "external-gateway.setup.apply": () => { throw createPackageRequestError({ code: "deadline_exceeded" }); } }); const { root, view } = start(client); await flush(); button(root, "Connect").click(); await flush();
   expect(root.textContent).toContain("Acceptance could not be confirmed"); expect(button(root, "Connect").disabled).toBe(true); expect(calls(client, "apply")).toHaveLength(1);
+  await client.emit("external-gateway.setup.watch", complete); await flush(); expect(button(root, "Connect").disabled).toBe(true);
+  await client.emit("external-gateway.setup.watch", { ...complete, phase: "accepted" });
   await client.emit("external-gateway.setup.watch", complete); await flush(); expect(root.textContent).toContain("Connection completed"); view.stop();
 });
 
@@ -215,4 +217,70 @@ it("a lost skill lease after a terminal result cannot turn completed work back i
   const acceptance = deferred<{ operationId: string }>(); const client = fake({ "external-gateway.setup.apply": () => acceptance.promise }); const { root, view } = start(client); await flush(); button(root, "Install skill…").click(); await flush(); await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "selected", path: "/chosen" }); await flush();
   await client.emit("external-gateway.setup.watch", { ...complete, intent: "install-skill", skill: "installed", access: "unchanged" }); await flush(); client.terminate("external-gateway.setup.choose-skill-folder", null); acceptance.resolve({ operationId: "opaque-operation" }); await flush();
   expect(root.textContent).toContain("Skill installation completed"); expect(root.textContent).not.toContain("Completion is unknown"); expect(button(root, "Install skill…").disabled).toBe(false); view.stop();
+});
+
+it("keeps attached setup controls and an open Command path through identical observations", async () => {
+  const client = fake(); const { root, view } = start(client); await flush();
+  const connect = button(root, "Connect"); const path = root.all().find(e => e.tagName === "details")!; path.open = true;
+  view.update({ ...policy }); await flush();
+  expect(button(root, "Connect")).toBe(connect); expect(root.all()).toContain(connect); expect(root.all()).toContain(path); expect(path.open).toBe(true);
+  await client.emit("external-gateway.setup.watch", idle); await flush();
+  expect(button(root, "Connect")).toBe(connect); expect(root.all()).toContain(path); expect(path.open).toBe(true);
+  view.update({ ...policy, port: 32123 }); expect(button(root, "Connect").disabled).toBe(true); await flush(); expect(button(root, "Connect").disabled).toBe(false); view.stop();
+});
+
+it("does not assure access is closed when origin inspection fails while Policy remains live", async () => {
+  const client = fake({ "external-gateway.setup.inspect": () => ({ ...connected, connection: { state: "unavailable", authority: "current", repair: "none", issue: "external_gateway.storage_failed" } }) });
+  const { root, view } = start(client); view.update({ ...policy, running: true, desiredEnabled: true, storageFailed: false }); await flush();
+  expect(root.textContent).toContain("Workspace connection: Status unavailable"); expect(root.textContent).not.toContain("Access is closed"); expect(root.textContent).toContain("Configuration");
+  await client.emit("external-gateway.setup.watch", { ...complete, phase: "repair-required", error: "external_gateway.storage_failed" }); await flush(); expect(root.textContent).not.toContain("Access is closed"); view.stop();
+});
+
+it("gives reload guidance and no usable Update for recognized already-published pending receipt", async () => {
+  const client = fake({ "external-gateway.setup.inspect": () => ({ ...facts, cli: { ...facts.cli, change: "explicit-repair", issue: "external_gateway.reload_required" } }) }); const { root, view } = start(client); await flush();
+  expect(root.textContent).toContain("Reload"); expect(root.textContent).not.toContain("source changed"); button(root, "Update CLI").click(); await flush(); expect(calls(client, "preview")).toHaveLength(0); view.stop();
+});
+
+it.each(["accepted", "uncertain", "waiting"] as const)("idle and unrelated history cannot settle a local %s submission", async mode => {
+  const accepted = deferred<{ operationId: string }>();
+  const client = fake({ "external-gateway.setup.apply": () => mode === "waiting" ? accepted.promise : mode === "accepted" ? { operationId: "opaque-operation" } : Promise.reject(createPackageRequestError({ code: "deadline_exceeded" })) });
+  const { root, view } = start(client); await flush();
+  const old = { ...complete, operationId: "previous-operation" }; await client.emit("external-gateway.setup.watch", old); await flush();
+  button(root, "Connect").click(); await flush();
+  for (const value of [idle, old, { ...complete, operationId: "unconfirmed-history" }, { ...complete, intent: "install-cli", operationId: "unrelated" }]) { await client.emit("external-gateway.setup.watch", value); await flush(); }
+  if (mode === "waiting") { accepted.resolve({ operationId: "opaque-operation" }); await flush(); }
+  expect(button(root, "Connect").disabled).toBe(true); expect(root.textContent).toContain(mode === "uncertain" ? "Acceptance could not be confirmed" : "Accepted");
+  button(root, "Connect").click(); await flush(); expect(calls(client, "apply")).toHaveLength(1);
+  await client.emit("external-gateway.setup.watch", { ...complete, phase: "accepted" }); await client.emit("external-gateway.setup.watch", complete); await flush();
+  expect(button(root, "Connect").disabled).toBe(false); expect(root.textContent).toContain("Connection completed"); view.stop();
+});
+
+it("idle during apply wait cannot suppress the eventual uncertain gate", async () => {
+  const release = deferred<void>(); const client = fake({ "external-gateway.setup.apply": async () => { await release.promise; throw createPackageRequestError({ code: "deadline_exceeded" }); } });
+  const { root, view } = start(client); await flush(); button(root, "Connect").click(); await flush(); await client.emit("external-gateway.setup.watch", idle); release.resolve(); await flush();
+  expect(button(root, "Connect").disabled).toBe(true); expect(root.textContent).toContain("Acceptance could not be confirmed"); view.stop();
+});
+
+it("a lost skill lease and idle watch keep uncertain submission gated until exact late acceptance completes", async () => {
+  const accepted = deferred<{ operationId: string }>(); const client = fake({ "external-gateway.setup.apply": () => accepted.promise }); const { root, view } = start(client); await flush();
+  button(root, "Install skill…").click(); await flush(); await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "selected", path: "/chosen" }); await flush();
+  client.terminate("external-gateway.setup.choose-skill-folder", null); await client.emit("external-gateway.setup.watch", idle); await flush();
+  expect(button(root, "Connect").disabled).toBe(true); expect(root.textContent).toContain("Completion is unknown");
+  await client.emit("external-gateway.setup.watch", { ...complete, intent: "install-skill", skill: "installed" }); accepted.resolve({ operationId: "opaque-operation" }); await flush();
+  expect(root.textContent).toContain("Skill installation completed"); expect(root.textContent).not.toContain("Completion is unknown"); expect(button(root, "Install skill…").disabled).toBe(false); expect(calls(client, "apply")).toHaveLength(1); view.stop();
+});
+
+it.each(["connect", "repair"] as const)("correlates pending Repair completion in its original %s history without accepting stale terminals", async original => {
+  const old = { ...complete, intent: original, phase: "repair-required", error: "external_gateway.output_storage_failed" };
+  const client = fake({ "external-gateway.setup.status": () => old, "external-gateway.setup.inspect": () => ({ ...facts, connection: { ...facts.connection, state: "needs-repair", repair: "resume" }, recovery: { state: "pending", intent: original } }) });
+  const { root, view } = start(client); await flush(); button(root, "Repair").click(); await flush();
+  await client.emit("external-gateway.setup.watch", old); await flush(); expect(button(root, "Repair").disabled).toBe(true);
+  await client.emit("external-gateway.setup.watch", { ...complete, intent: original }); await flush(); expect(button(root, "Repair").disabled).toBe(false); expect(root.textContent).toContain("completed"); expect(calls(client, "apply")).toHaveLength(1); view.stop();
+});
+
+it("settles uncertain resumed Repair from meaningful same-ID progress and original-intent completion", async () => {
+  const old = { ...complete, phase: "repair-required", error: "external_gateway.output_storage_failed" };
+  const client = fake({ "external-gateway.setup.status": () => old, "external-gateway.setup.inspect": () => ({ ...facts, connection: { ...facts.connection, state: "needs-repair", repair: "resume" }, recovery: { state: "pending", intent: "connect" } }), "external-gateway.setup.apply": () => Promise.reject(createPackageRequestError({ code: "deadline_exceeded" })) });
+  const { root, view } = start(client); await flush(); button(root, "Repair").click(); await flush(); await client.emit("external-gateway.setup.watch", old); await client.emit("external-gateway.setup.watch", idle); await flush(); expect(button(root, "Repair").disabled).toBe(true);
+  await client.emit("external-gateway.setup.watch", { ...old, phase: "outputs", error: null }); await client.emit("external-gateway.setup.watch", complete); await flush(); expect(button(root, "Repair").disabled).toBe(false); expect(root.textContent).toContain("completed"); view.stop();
 });

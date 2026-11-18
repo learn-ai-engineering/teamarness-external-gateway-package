@@ -300,6 +300,10 @@ fn every_durable_boundary_restarts_only_from_exact_old_or_new_bytes() {
         );
         assert_eq!(observation.pending, journal_before.is_some());
         assert_eq!(
+            observation.published_pending,
+            journal_before.is_some() && actual == new
+        );
+        assert_eq!(
             fs::read(state(&home).join("command.journal")).ok(),
             journal_before
         );

@@ -581,7 +581,7 @@ impl SetupCoordinator {
                 };
                 json!({"state":state,"path":path,"version":observation.version,
                     "change":if observation.pending {"explicit-repair"} else {change},
-                    "issue":if observation.pending {Some("external_gateway.output_repair_required".to_owned())} else {issue}})
+                    "issue":if observation.published_pending {Some("external_gateway.reload_required".to_owned())} else if observation.pending {Some("external_gateway.output_repair_required".to_owned())} else {issue}})
             }
             Err(e) => {
                 json!({"state":if e.code() == "external_gateway.output_storage_failed" {"unavailable"} else {"blocked"},

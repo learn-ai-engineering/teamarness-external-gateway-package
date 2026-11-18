@@ -358,7 +358,10 @@ unfinished credential work and active owned work still block competing actions.
 There is no CLI uninstall action. Command-only acceptance/progress is ephemeral;
 after restart, the recognized installer receipt/journal supplies installed truth.
 Recognized command recovery is independent of private credential observation;
-failed CLI work never invokes credential recovery.
+failed CLI work never invokes credential recovery. If exact new command bytes
+are already published but their receipt is still unfinished after storage failure,
+restore storage and Reload the Package to reconcile them. Inspection remains
+read-only and does not offer an unusable Update CLI action for that state.
 
 The closed `external-gateway.setup.inspect` request returns three current facts:
 `cli` (recognition/path/version and candidate change), `connection` (actual
@@ -375,8 +378,10 @@ snapshot and cannot authorize a later action without fresh admission checks.
 An intact connection remains connected when the listener is stopped or after a
 skill/CLI result. Missing bearer requires explicit replacement; endpoint-only
 mismatch permits publication repair with intact credentials. Revoked/disconnected
-tombstones never regain access through inspection. Status/watch and all five
-legacy intents/disk forms remain unchanged. The new live CLI intent is explicitly
+tombstones never regain access through inspection. An unavailable inspection does
+not prove that access stopped: existing Policy-authorized access may remain live.
+Configuration retains explicit revoke and Disable-and-revoke controls.
+Status/watch and all five legacy intents/disk forms remain unchanged. The new live CLI intent is explicitly
 invalid in credential setup Journal/Completed files, so old readers never receive
 a new durable CLI history form from this implementation.
 
@@ -394,4 +399,7 @@ outputs are still refused. Skill chooser confirmation installs only the
 skill, Cancel writes nothing, and credential actions never carry a folder
 selection. The live chooser lease lasts through acceptance. Current connection
 facts are separate from operation progress/results and listener running state;
-closing a view never cancels an accepted operation. There is no CLI uninstall.
+closing a view never cancels an accepted operation. Idle or unrelated historical
+updates cannot settle a locally submitted action. If acceptance is unknown and no
+correlated operation update arrives, reopen the view to inspect current state;
+setup never automatically retries the action. There is no CLI uninstall.
