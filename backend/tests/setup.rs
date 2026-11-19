@@ -6,7 +6,7 @@ use teamarness_generated_package_backend::{router_with_environment, setup::Backe
 use teamarness_package_sdk::testing::{Harness, HarnessBuilder, ScriptedCapability};
 async fn start(data: &std::path::Path, home: &std::path::Path) -> Harness {
     let source = data.join("source");
-    std::fs::write(&source, b"fixture admitted executable").unwrap();
+    support::write_private(&source, b"fixture admitted executable");
     let digest = Sha256::digest(b"fixture admitted executable")
         .iter()
         .map(|b| format!("{b:02x}"))
@@ -52,8 +52,8 @@ async fn finish(h: &mut Harness) -> Value {
 }
 #[tokio::test]
 async fn preview_is_read_only_and_connect_requires_committed_running_port() {
-    let data = tempfile::tempdir().unwrap();
-    let home = tempfile::tempdir().unwrap();
+    let data = support::private_dir();
+    let home = support::private_dir();
     let mut h = start(data.path(), home.path()).await;
     assert_eq!(
         h.request(
@@ -70,8 +70,8 @@ async fn preview_is_read_only_and_connect_requires_committed_running_port() {
 }
 #[tokio::test]
 async fn connect_idempotent_apply_rotation_disconnect_and_no_secret_status() {
-    let data = tempfile::tempdir().unwrap();
-    let home = tempfile::tempdir().unwrap();
+    let data = support::private_dir();
+    let home = support::private_dir();
     let mut h = start(data.path(), home.path()).await;
     h.request("external-gateway.listener.set", json!({"enabled":true}))
         .await
@@ -227,9 +227,9 @@ async fn four_previews_expire_and_policy_revision_or_destination_change_requires
         .code(),
         "external_gateway.setup_preview_stale"
     );
-    let folder = tempfile::tempdir().unwrap();
+    let folder = support::private_dir();
     let path = folder.path().canonicalize().unwrap().join("chosen");
-    std::fs::create_dir(&path).unwrap();
+    support::create_private_dir(&path).unwrap();
     let id = s.setup.register_selection(path.clone()).await.unwrap();
     let p = h
         .request(
@@ -239,7 +239,7 @@ async fn four_previews_expire_and_policy_revision_or_destination_change_requires
         .await
         .unwrap();
     std::fs::rename(&path, path.with_file_name("moved")).unwrap();
-    std::fs::create_dir(&path).unwrap();
+    support::create_private_dir(&path).unwrap();
     assert!(
         h.request(
             "external-gateway.setup.apply",
@@ -271,7 +271,7 @@ async fn opaque_selection_only_closed_requests_and_exact_secret_free_status_watc
                 .is_err()
         );
     }
-    let folder = tempfile::tempdir().unwrap();
+    let folder = support::private_dir();
     let id = s
         .setup
         .register_selection(folder.path().canonicalize().unwrap())
@@ -575,7 +575,7 @@ async fn install_skill_and_its_explicit_repair_need_no_listener_or_credential_au
         }
     }
     let f = support::Fixture::new();
-    let folder = tempfile::tempdir().unwrap();
+    let folder = support::private_dir();
     let mut e = f.environment();
     e.install_fault = Some(Arc::new(Fault(AtomicBool::new(true))));
     let (mut h, s) = f.start_with(e).await;
@@ -680,7 +680,7 @@ async fn repeated_connect_refuses_but_second_folder_install_preserves_managed_cr
         "external_gateway.managed_setup_required"
     );
     for _ in 0..2 {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = support::private_dir();
         let id = s
             .setup
             .register_selection(folder.path().canonicalize().unwrap())

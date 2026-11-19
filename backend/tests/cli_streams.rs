@@ -293,7 +293,7 @@ impl LiveFixture {
         use support::*;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let home = tempfile::tempdir().unwrap();
+        let home = private_home();
         let mut c = connection("workspace-a", "Acme");
         c.port = listener.local_addr().unwrap().port();
         teamarness_generated_package_backend::client_store::ClientStore::for_home(

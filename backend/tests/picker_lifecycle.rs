@@ -48,7 +48,13 @@ fn fixture(mode: &str) -> support::Fixture {
     let mut f = support::Fixture::new();
     f.source = f.data.path().canonicalize().unwrap().join(mode);
     std::fs::copy(executable(), &f.source).unwrap();
-    std::fs::create_dir(f.data.path().join("chosen")).unwrap();
+    // Owner-only, as the Host admits Backend bytes; `copy` keeps Cargo's build-umask mode.
+    std::fs::set_permissions(
+        &f.source,
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )
+    .unwrap();
+    support::create_private_dir(f.data.path().join("chosen")).unwrap();
     f
 }
 #[cfg(target_os = "macos")]

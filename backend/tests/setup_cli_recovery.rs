@@ -366,7 +366,7 @@ async fn all_legacy_journals_remain_readable_and_reserve_outputs_but_cli_intent_
         let mut e = f.environment();
         e.setup_fault = Some(Arc::new(PreparedFailure));
         let (mut h, s) = f.start_with(e).await;
-        let folder = tempfile::tempdir().unwrap();
+        let folder = support::private_dir();
         let mut request = json!({"intent":intent});
         if intent == "install-skill" {
             request["selectionId"] = json!(

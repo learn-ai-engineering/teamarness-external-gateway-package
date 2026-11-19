@@ -13,12 +13,32 @@ pub struct Fixture {
     pub home: tempfile::TempDir,
     pub source: PathBuf,
 }
+/// An owner-only temporary directory, independent of the process umask (Ubuntu's
+/// default 0002 would otherwise create a group-writable home the stores refuse).
+pub fn private_dir() -> tempfile::TempDir {
+    use std::os::unix::fs::PermissionsExt;
+    tempfile::Builder::new()
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir()
+        .unwrap()
+}
+/// Creates one owner-only directory, independent of the process umask.
+pub fn create_private_dir(path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new().mode(0o700).create(path)
+}
+/// Writes a file with an explicit owner-only mode, as the Host admits Backend bytes.
+pub fn write_private(path: &std::path::Path, bytes: &[u8]) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::write(path, bytes).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+}
 impl Fixture {
     pub fn new() -> Self {
-        let data = tempfile::tempdir().unwrap();
-        let home = tempfile::tempdir().unwrap();
+        let data = private_dir();
+        let home = private_dir();
         let source = data.path().canonicalize().unwrap().join("source");
-        std::fs::write(&source, b"admitted setup fixture v1").unwrap();
+        write_private(&source, b"admitted setup fixture v1");
         Self { data, home, source }
     }
     pub fn environment(&self) -> BackendEnvironment {

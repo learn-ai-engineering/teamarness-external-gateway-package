@@ -1,7 +1,7 @@
 use teamarness_generated_package_backend::client_store::{ClientStore, Connection};
 #[test]
 fn durable_connection_and_local_summary_never_disclose_credentials() {
-    let home = tempfile::tempdir().unwrap();
+    let home = private_home();
     let store = ClientStore::for_home(&home.path().canonicalize().unwrap()).unwrap();
     let c = connection("workspace-a", "Acme");
     store.publish(&c).unwrap();
@@ -43,7 +43,7 @@ fn record(home: &std::path::Path, id: &str) -> std::path::PathBuf {
 #[test]
 fn filename_identity_duplicate_origin_and_future_invalid_state_are_preserved() {
     for kind in ["filename", "origin", "future", "malformed", "duplicate-key"] {
-        let home = tempfile::tempdir().unwrap();
+        let home = private_home();
         let path = home.path().canonicalize().unwrap();
         let store = ClientStore::for_home(&path).unwrap();
         let c = connection("workspace-a", "Acme");
@@ -87,7 +87,7 @@ fn filename_identity_duplicate_origin_and_future_invalid_state_are_preserved() {
 }
 #[test]
 fn record_and_count_boundaries_are_exact() {
-    let home = tempfile::tempdir().unwrap();
+    let home = private_home();
     let path = home.path().canonicalize().unwrap();
     let store = ClientStore::for_home(&path).unwrap();
     for n in 0..128 {
@@ -137,7 +137,7 @@ fn symlink_hardlink_modes_ownership_and_unsafe_traversal_fail_closed() {
         "lock-symlink",
         "private-mode",
     ] {
-        let home = tempfile::tempdir().unwrap();
+        let home = private_home();
         let path = home.path().canonicalize().unwrap();
         let store = ClientStore::for_home(&path).unwrap();
         let c = connection("workspace-a", "Acme");
@@ -170,9 +170,9 @@ fn symlink_hardlink_modes_ownership_and_unsafe_traversal_fail_closed() {
             assert_eq!(fs::read(&file).unwrap(), before);
         }
     }
-    let home = tempfile::tempdir().unwrap();
+    let home = private_home();
     let path = home.path().canonicalize().unwrap();
-    let other = tempfile::tempdir().unwrap();
+    let other = private_home();
     symlink(other.path(), path.join(".local")).unwrap();
     assert!(ClientStore::for_home(&path).unwrap().summaries().is_err());
     assert!(ClientStore::for_home(&path.join("..")).is_err());
@@ -182,7 +182,7 @@ fn symlink_hardlink_modes_ownership_and_unsafe_traversal_fail_closed() {
 }
 #[test]
 fn existing_intermediate_modes_and_unrelated_files_are_unchanged() {
-    let home = tempfile::tempdir().unwrap();
+    let home = private_home();
     let path = home.path().canonicalize().unwrap();
     fs::create_dir(path.join(".local")).unwrap();
     fs::set_permissions(path.join(".local"), fs::Permissions::from_mode(0o755)).unwrap();
@@ -232,7 +232,7 @@ fn durability_faults_never_acknowledge_or_change_unrelated_records() {
         WriteStage::Rename,
         WriteStage::DirectorySync,
     ] {
-        let home = tempfile::tempdir().unwrap();
+        let home = private_home();
         let path = home.path().canonicalize().unwrap();
         let store = ClientStore::for_home(&path).unwrap();
         let c = connection("workspace-a", "Acme");
@@ -257,7 +257,7 @@ fn durability_faults_never_acknowledge_or_change_unrelated_records() {
 }
 #[test]
 fn concurrent_name_publication_cannot_resurrect_rotated_credentials() {
-    let home = tempfile::tempdir().unwrap();
+    let home = private_home();
     let path = home.path().canonicalize().unwrap();
     let store = ClientStore::for_home(&path).unwrap();
     let c = connection("workspace-a", "Old");
@@ -305,7 +305,7 @@ fn lock_child() {
 #[test]
 fn lock_contention_and_process_death_release_the_os_lock() {
     use std::io::{BufRead, BufReader};
-    let home = tempfile::tempdir().unwrap();
+    let home = private_home();
     let path = home.path().canonicalize().unwrap();
     let store = ClientStore::for_home(&path).unwrap();
     let c = connection("workspace-a", "Acme");
@@ -332,7 +332,7 @@ fn lock_contention_and_process_death_release_the_os_lock() {
 }
 #[test]
 fn abandoned_temporary_bytes_are_never_promoted_or_reclaimed_by_reads() {
-    let home = tempfile::tempdir().unwrap();
+    let home = private_home();
     let path = home.path().canonicalize().unwrap();
     let store = ClientStore::for_home(&path).unwrap();
     let c = connection("workspace-a", "Acme");
@@ -348,4 +348,12 @@ fn abandoned_temporary_bytes_are_never_promoted_or_reclaimed_by_reads() {
         store.resolve("workspace-a").unwrap().workspace_name,
         "Renamed"
     );
+}
+/// An owner-only injected home, independent of the process umask (Ubuntu's default
+/// 0002 would otherwise create a group-writable home the store refuses).
+fn private_home() -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .permissions(fs::Permissions::from_mode(0o700))
+        .tempdir()
+        .unwrap()
 }

@@ -329,7 +329,11 @@ fn copied_fixture_tmx_uses_only_explicit_child_home_and_shared_cli_logic() {
     use teamarness_generated_package_backend::managed_install::{
         Admitted, Approval, ManagedInstaller,
     };
-    let source = fixture_executable();
+    // Admit a private owner-only copy, as the Host admits Backend bytes: Cargo's output
+    // and its directories follow the build umask (group-writable under Ubuntu's 0002).
+    let source = root.join("admitted-fixture");
+    std::fs::copy(fixture_executable(), &source).unwrap();
+    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o700)).unwrap();
     let digest: String = Sha256::digest(std::fs::read(&source).unwrap())
         .iter()
         .map(|b| format!("{b:02x}"))

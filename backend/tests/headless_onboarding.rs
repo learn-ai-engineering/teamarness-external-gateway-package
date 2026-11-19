@@ -179,16 +179,25 @@ async fn start(data: &Path, home: &Path, admitted: &Path) -> Operator {
 
 #[tokio::test]
 async fn request_only_install_listen_select_connect_call_rotate_and_disconnect() {
-    let data = tempfile::tempdir().unwrap();
-    let home = tempfile::tempdir().unwrap();
-    let staging = tempfile::tempdir().unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    // Owner-only modes are explicit, so the fixtures do not depend on the process umask
+    // (Ubuntu's default 0002 would make them group-writable, which the stores refuse).
+    let private = || {
+        tempfile::Builder::new()
+            .permissions(std::fs::Permissions::from_mode(0o700))
+            .tempdir()
+            .unwrap()
+    };
+    let (data, home, staging) = (private(), private(), private());
     let (data_path, home_path) = (
         data.path().canonicalize().unwrap(),
         home.path().canonicalize().unwrap(),
     );
     // A private copy keeps the admitted bytes stable while other tests rebuild the example.
+    // It is owner-only, as the Host admits Backend bytes; `copy` keeps Cargo's build mode.
     let admitted = staging.path().canonicalize().unwrap().join("tmx-fixture");
     std::fs::copy(cli_fixture(), &admitted).unwrap();
+    std::fs::set_permissions(&admitted, std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut o = start(&data_path, &home_path, &admitted).await;
 
     // 1. Nothing is installed and this Workspace has no connection.
