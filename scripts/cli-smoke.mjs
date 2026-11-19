@@ -1,7 +1,7 @@
 // Offline final-artifact proof only. Never performs setup or resolves the user's client home.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFile, chmod, mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, chmod, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -38,10 +38,16 @@ export async function smokeCli(executable, version) {
       assert.match(help, /No automatic retries or reconnects/);
       assert.equal(invoke(path, [...prefix, "--licenses"]), `${notices}\n`);
       assert.match(help, /--licenses/);
+      assert.match(help, /^  --skill {13}Offline portable skill text for manual installation$/m);
+      // Exact file bytes naming the invoked executable's canonical path as one POSIX word.
+      const command = `'${(await realpath(path)).replaceAll("'", "'\\''")}'`;
+      const skill = invoke(path, [...prefix, "--skill"]);
+      assert.equal(skill, template.toString("utf8").replaceAll("{{COMMAND}}", () => command));
+      assert.ok(!/\{\{|eg1\.|\.local\/share/.test(skill), "portable skill is secret-free and store-path-free");
       assert.equal(invoke(path, [...prefix, "--version"]), `tmx ${version} (CLI 1)\n`);
       assert.equal(invoke(path, [...prefix, "--help"]), help);
     }
-    console.log("Final embedded portable skill and native CLI modes: offline help/version/licenses, explicit and basename tmx passed.");
+    console.log("Final embedded portable skill and native CLI modes: offline help/version/licenses/skill, explicit and basename tmx passed.");
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

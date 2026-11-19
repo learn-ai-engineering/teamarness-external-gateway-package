@@ -98,6 +98,25 @@ fn previous_skill(selected: &Path) {
     fs::write(receipt, serde_json::to_vec(&v).unwrap()).unwrap();
 }
 #[test]
+fn offline_render_is_byte_identical_to_installed_skill_for_the_same_command() {
+    use teamarness_generated_package_backend::skill_install::render;
+    let (_t, base, _) = setup();
+    let home = base.join("it's a home");
+    fs::create_dir(&home).unwrap();
+    let selected = base.join("agent skills");
+    fs::create_dir(&selected).unwrap();
+    install(&home, &selected);
+    let managed = ManagedInstaller::for_home(&home).unwrap();
+    let rendered = render(&managed.command_path()).unwrap();
+    assert_eq!(
+        rendered.as_bytes(),
+        fs::read(selected.join("teamarness/SKILL.md")).unwrap()
+    );
+    assert!(!rendered.contains("{{"));
+    assert!(render(Path::new("relative/tmx")).is_err());
+    assert!(render(Path::new("/control\n/tmx")).is_err());
+}
+#[test]
 fn command_with_spaces_and_literal_apostrophes_is_a_single_executable_word() {
     let (_t, base, _) = setup();
     let home = base.join("my home's space");

@@ -460,6 +460,123 @@ fn licenses_are_offline_embedded_and_reject_other_arguments() {
     }
 }
 
+/// Independent POSIX single-quoting of the expected canonical command word.
+fn expected_skill(command: &std::path::Path) -> String {
+    let word = format!("'{}'", command.to_str().unwrap().replace('\'', "'\\''"));
+    include_str!("../resources/teamarness/SKILL.md").replace("{{COMMAND}}", &word)
+}
+fn assert_portable_skill(stdout: &[u8], command: &std::path::Path) {
+    let text = std::str::from_utf8(stdout).unwrap();
+    assert_eq!(text, expected_skill(command));
+    for forbidden in ["{{", "eg1.", ".local/share", "Bearer"] {
+        assert!(!text.contains(forbidden), "{forbidden}");
+    }
+}
+#[test]
+fn skill_is_offline_rendered_for_the_canonical_invoked_executable() {
+    let exe = env!("CARGO_BIN_EXE_teamarness-generated-package-backend");
+    let dir = tempfile::tempdir().unwrap();
+    // Temporary directories are reached through a symlinked /var on macOS; output is canonical.
+    let folder = dir.path().join("it's a dir");
+    std::fs::create_dir(&folder).unwrap();
+    let copy = folder.join("tmx");
+    std::fs::copy(exe, &copy).unwrap();
+    let canonical = copy.canonicalize().unwrap();
+    assert_ne!(canonical, copy);
+    let links = dir.path().join("link dir");
+    std::fs::create_dir(&links).unwrap();
+    let link = links.join("tmx");
+    std::os::unix::fs::symlink(&copy, &link).unwrap();
+    for (path, args) in [
+        (copy.clone(), vec!["--skill"]),
+        (copy.clone(), vec!["--tmx-cli", "--skill"]),
+        (link, vec!["--skill"]),
+    ] {
+        let output = Command::new(&path)
+            .args(args)
+            .current_dir(dir.path())
+            .env_clear()
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stderr.is_empty());
+        assert_portable_skill(&output.stdout, &canonical);
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .contains("it'\\''s a dir/tmx' workspaces\n")
+        );
+    }
+    let output = Command::new(exe)
+        .args(["--tmx-cli", "--skill"])
+        .env_clear()
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    assert_portable_skill(
+        &output.stdout,
+        &std::path::Path::new(exe).canonicalize().unwrap(),
+    );
+}
+#[test]
+fn skill_refuses_extra_arguments_and_unquotable_executable_paths() {
+    let exe = env!("CARGO_BIN_EXE_teamarness-generated-package-backend");
+    for args in [
+        vec!["--skill", "extra"],
+        vec!["--skill", "--version"],
+        vec!["--version", "--skill"],
+        vec!["--skill", "--skill"],
+        vec!["--skill", "--licenses"],
+        vec!["--workspace", "a", "--skill"],
+        vec!["workspaces", "--skill"],
+    ] {
+        let output = Command::new(exe)
+            .arg("--tmx-cli")
+            .args(&args)
+            .env_clear()
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        assert_eq!(
+            output.stdout,
+            br#"{"error":{"code":"cli.invalid_arguments","details":{},"outcomeUncertain":false,"retryable":false,"source":"cli"}}
+"#,
+            "{args:?}"
+        );
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("control\u{1}dir");
+    std::fs::create_dir(&folder).unwrap();
+    let copy = folder.join("tmx");
+    std::fs::copy(exe, &copy).unwrap();
+    let output = Command::new(&copy)
+        .arg("--skill")
+        .env_clear()
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        output.stdout,
+        br#"{"error":{"code":"cli.skill_unavailable","details":{},"outcomeUncertain":false,"retryable":false,"source":"cli"}}
+"#
+    );
+    assert!(!output.stderr.is_empty());
+}
+#[test]
+fn help_lists_offline_skill_option() {
+    let output = Command::new(env!("CARGO_BIN_EXE_teamarness-generated-package-backend"))
+        .args(["--tmx-cli", "--help"])
+        .output()
+        .unwrap();
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        help.contains(
+            "\n  --skill             Offline portable skill text for manual installation\n"
+        )
+    );
+}
+
 #[test]
 fn embedded_literal_notice_checksums_are_intact() {
     use sha2::{Digest, Sha256};

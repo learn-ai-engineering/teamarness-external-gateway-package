@@ -22,6 +22,10 @@ pub fn quoted_command(path: &Path) -> Result<String> {
     }
     Ok(format!("'{}'", raw.replace('\'', "'\\''")))
 }
+/// The one portable skill rendering, shared by selected-folder publication and `tmx --skill`.
+pub fn render(command: &Path) -> Result<String> {
+    Ok(TEMPLATE.replace("{{COMMAND}}", &quoted_command(command)?))
+}
 pub struct SkillInstaller<'a> {
     managed: &'a ManagedInstaller,
 }
@@ -30,10 +34,7 @@ impl<'a> SkillInstaller<'a> {
         Self { managed }
     }
     pub fn preview(&self, selected_folder: &Path, admitted: Admitted) -> Result<SkillPlan> {
-        let content = TEMPLATE.replace(
-            "{{COMMAND}}",
-            &quoted_command(&self.managed.command_path())?,
-        );
+        let content = render(&self.managed.command_path())?;
         self.managed
             .preview_skill(selected_folder, admitted, content.into_bytes())
     }

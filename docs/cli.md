@@ -6,7 +6,7 @@ command/skill setup with native folder selection and owning-Installation refresh
 No installed-access qualification is claimed.
 
 From an assembled Package Directory, use its absolute Backend executable path
-with `--tmx-cli --help` or `--tmx-cli --version`. A copy named `tmx` selects CLI
+with `--tmx-cli --help`, `--tmx-cli --version` or `--tmx-cli --skill`. A copy named `tmx` selects CLI
 mode even without arguments. The admitted executable with no arguments remains
 the Backend. Invalid arguments never enter Host stdio. `--tmx-picker` is a private native-helper entry, not a CLI command. There is no public endpoint or credential-path option.
 
@@ -22,7 +22,7 @@ tmx --workspace <id-or-exact-unique-name> subscribe <contract> <port> --major <n
 tmx --workspace <id-or-exact-unique-name> subscribe <contract> <port> --major <number> --input <file|-> --for 2m [--max-events 10]
 ```
 
-Help/version are offline. `workspaces` lists only locally configured connections,
+Help, version, licenses and skill output are offline. `workspaces` lists only locally configured connections,
 without probing or printing credentials, origin nonces, or private paths. A
 single configured Workspace is **not** a default. IDs win over exact names;
 duplicate exact names return candidate IDs. Names are last-observed metadata.
@@ -350,6 +350,33 @@ Installed checks require the disposable OS account/home and M1–M5 observations
 provenance offline, before home lookup, sockets or AppKit. Like help/version it
 needs no Workspace and accepts no other options. The same native artifact retains
 these notices after managed copy or Package Directory movement.
+
+### Manual skill installation with `tmx --skill`
+
+`tmx --skill` (or `<executable> --tmx-cli --skill`) prints the portable skill to
+stdout, offline. It does no home lookup, client-store read, network or Host
+work, and does not start AppKit. Like `--licenses`, it accepts no other options.
+The output is the same rendering that selected-folder publication writes, byte
+for byte, for the same command path. It contains no credential, default
+Workspace, private-store path or copied Provider contract.
+
+The skill names the running executable's own canonical absolute path as its one
+shell-quoted command. Run it from the installed managed copy, so that the skill
+names that copy:
+
+```sh
+mkdir -p '<agent skill folder>/teamarness'
+~/.local/bin/tmx --skill > '<agent skill folder>/teamarness/SKILL.md'
+```
+
+If you run it from another copy, such as a Package Directory's Backend
+executable, the skill names that copy instead. A manually written file has no
+receipt, so the app's skill publication treats it as unrecognized and refuses
+to replace it. Rerun the command after a CLI update, so the text matches the
+new version, and after moving the executable. If the executable
+path cannot be quoted safely (not absolute, not UTF-8, longer than 4096 bytes or
+containing a control character), it refuses with `cli.skill_unavailable` and
+exit 2.
 
 ### Independent internal CLI action and current facts
 

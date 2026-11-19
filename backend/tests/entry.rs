@@ -364,6 +364,7 @@ fn copied_fixture_tmx_uses_only_explicit_child_home_and_shared_cli_logic() {
         vec!["--help"],
         vec!["--version"],
         vec!["--licenses"],
+        vec!["--skill"],
     ] {
         let output = std::process::Command::new(&copy)
             .args(args)
@@ -373,6 +374,36 @@ fn copied_fixture_tmx_uses_only_explicit_child_home_and_shared_cli_logic() {
             .unwrap();
         assert!(output.status.success());
     }
+    // The skill names the canonical invoked copy, never the managed home path it was copied from.
+    let moved = root.join("agent's fixture dir");
+    std::fs::create_dir(&moved).unwrap();
+    std::fs::copy(&copy, moved.join("tmx")).unwrap();
+    let expected = include_str!("../resources/teamarness/SKILL.md").replace(
+        "{{COMMAND}}",
+        &format!(
+            "'{}'\\''s fixture dir/tmx'",
+            root.join("agent").to_str().unwrap()
+        ),
+    );
+    for args in [vec!["--skill"], vec!["--tmx-cli", "--skill"]] {
+        let output = std::process::Command::new(moved.join("tmx"))
+            .args(&args)
+            .env_clear()
+            .env("TEAMARNESS_FIXTURE_HOME", &home)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stderr.is_empty());
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), expected);
+    }
+    let refused = std::process::Command::new(moved.join("tmx"))
+        .args(["--skill", "extra"])
+        .env_clear()
+        .env("TEAMARNESS_FIXTURE_HOME", &home)
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(2));
+    assert!(refused.stdout.starts_with(b"{\"error\":"));
     for missing_or_invalid in [
         None,
         Some(root.join("missing")),

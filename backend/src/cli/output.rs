@@ -39,6 +39,9 @@ impl Failure {
             "cli.command_outcome_unknown" => {
                 "The command may have completed. Reconcile using the Provider guide before trying again."
             }
+            "cli.skill_unavailable" => {
+                "This executable's path cannot be named safely. Run --skill from an absolute path without control characters."
+            }
             "cli.transport_failed" => {
                 "Check the gateway in the Teamarness app. No request was replayed."
             }

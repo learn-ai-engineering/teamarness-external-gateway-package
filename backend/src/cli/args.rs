@@ -2,12 +2,13 @@ use super::output::Failure;
 use crate::limits::*;
 use std::io::Read;
 
-pub const HELP: &str = "tmx — access a Teamarness Workspace\n\nUsage:\n  tmx workspaces\n  tmx --workspace <id-or-exact-name> <command> [options]\n\nCommands:\n  workspaces   List locally configured gateways (offline)\n  status       Check authenticated Workspace identity\n  contracts    Discover one page; follow nextCursor even after an empty page\n  schema <contract> --major <number>\n  guide <contract> --major <number>\n  call <contract> <port> --major <number> (--json <value> | --input <file|->)\n  subscribe <contract> <port> --major <number> (--json <value> | --input <file|->)\n    (--for <duration> | --until-cancelled) [--max-events <n>]\n\nOptions:\n  --workspace <value>  Required for every gateway command; no default\n  --cursor <value>     Next contracts page's opaque cursor\n  --json <value>       Exactly one request JSON value\n  --input <file|->     Explicit file or stdin; exclusive with --json\n  --for <duration>    Positive integer ms/s/m/h; starts at ready\n  --until-cancelled   No CLI lifetime limit; exactly one lifetime flag required\n  --max-events <n>    Positive u32 bound; counts values only, not heartbeats\n  --help              Offline help\n  --version           Package version and CLI interaction major\n  --licenses          Offline third-party license texts and provenance\n\nOrdinary results/errors are JSON; subscriptions are NDJSON. Diagnostics go to stderr.\nNo automatic retries or reconnects. Heartbeats are not domain events.\nSubscriptions require stdout pipe/terminal; save via a pipe to tee with shell pipefail.\nProvider pagination and version tokens remain Provider-owned.\n";
+pub const HELP: &str = "tmx — access a Teamarness Workspace\n\nUsage:\n  tmx workspaces\n  tmx --workspace <id-or-exact-name> <command> [options]\n\nCommands:\n  workspaces   List locally configured gateways (offline)\n  status       Check authenticated Workspace identity\n  contracts    Discover one page; follow nextCursor even after an empty page\n  schema <contract> --major <number>\n  guide <contract> --major <number>\n  call <contract> <port> --major <number> (--json <value> | --input <file|->)\n  subscribe <contract> <port> --major <number> (--json <value> | --input <file|->)\n    (--for <duration> | --until-cancelled) [--max-events <n>]\n\nOptions:\n  --workspace <value>  Required for every gateway command; no default\n  --cursor <value>     Next contracts page's opaque cursor\n  --json <value>       Exactly one request JSON value\n  --input <file|->     Explicit file or stdin; exclusive with --json\n  --for <duration>    Positive integer ms/s/m/h; starts at ready\n  --until-cancelled   No CLI lifetime limit; exactly one lifetime flag required\n  --max-events <n>    Positive u32 bound; counts values only, not heartbeats\n  --help              Offline help\n  --version           Package version and CLI interaction major\n  --licenses          Offline third-party license texts and provenance\n  --skill             Offline portable skill text for manual installation\n\nOrdinary results/errors are JSON; subscriptions are NDJSON. Diagnostics go to stderr.\nNo automatic retries or reconnects. Heartbeats are not domain events.\nSubscriptions require stdout pipe/terminal; save via a pipe to tee with shell pipefail.\nProvider pagination and version tokens remain Provider-owned.\n";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     Help,
     Version,
     Licenses,
+    Skill,
     Workspaces,
     Status,
     Contracts,
@@ -79,6 +80,9 @@ pub fn parse(args: &[String], stdin: &mut dyn Read) -> Result<Args, Failure> {
     }
     if args == ["--licenses"] {
         return Ok(simple(Command::Licenses));
+    }
+    if args == ["--skill"] {
+        return Ok(simple(Command::Skill));
     }
     let (mut workspace, mut major, mut json, mut input, mut cursor) =
         (None, None, None, None, None);
