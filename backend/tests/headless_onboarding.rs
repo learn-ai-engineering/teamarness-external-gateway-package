@@ -196,7 +196,25 @@ async fn request_only_install_listen_select_connect_call_rotate_and_disconnect()
     // A private copy keeps the admitted bytes stable while other tests rebuild the example.
     // It is owner-only, as the Host admits Backend bytes; `copy` keeps Cargo's build mode.
     let admitted = staging.path().canonicalize().unwrap().join("tmx-fixture");
+    #[cfg(not(target_os = "linux"))]
     std::fs::copy(cli_fixture(), &admitted).unwrap();
+    // Test-only Linux adapter: an ELF debug build embeds its DWARF (about 147 MB here, against
+    // 22 MB on macOS, which keeps it outside the binary). Every inspect, preview and apply
+    // hashes the admitted bytes with debug-built SHA-256, which then overruns the bounded
+    // setup poll. Admitting a debuginfo-stripped copy restores the intended fixture size.
+    // binutils `strip` ships with the documented `build-essential` prerequisite.
+    #[cfg(target_os = "linux")]
+    assert!(
+        std::process::Command::new("/usr/bin/strip")
+            .arg("--strip-debug")
+            .arg("-o")
+            .args([&admitted, &cli_fixture()])
+            .env_clear()
+            .status()
+            .unwrap()
+            .success(),
+        "strip the admitted fixture copy"
+    );
     std::fs::set_permissions(&admitted, std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut o = start(&data_path, &home_path, &admitted).await;
 
