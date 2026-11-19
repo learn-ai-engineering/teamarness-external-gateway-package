@@ -75,8 +75,13 @@ impl Operator {
         response
     }
     /// Poll `setup.status` until the accepted operation leaves its in-progress phases.
+    ///
+    /// The bound only guards against a hang. Connect and rotate hash the admitted and installed
+    /// fixture bytes about eight times with debug-built SHA-256. On an x86_64 CPU without
+    /// SHA-NI (factory2's i7-8550U) that runs at about 16 MB/s, so one operation takes about 10
+    /// seconds there, against under 2 on Apple Silicon, which has SHA-2 instructions.
     async fn finish(&mut self) -> Value {
-        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
             loop {
                 let s = self
                     .request("external-gateway.setup.status", json!({}))
