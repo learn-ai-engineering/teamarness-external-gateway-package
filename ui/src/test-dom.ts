@@ -20,6 +20,10 @@ export class Element {
   constructor(readonly tagName: string) {}
   set textContent(value: string) { this.replaceChildren(); this.text = value; }
   get textContent(): string { return this.text + this.children.map(c => c.textContent).join(" "); }
+  get outerHTML(): string {
+    const attributes = [...this.attributes].map(([name, value]) => `${name}=${JSON.stringify(value)}`).join(" ");
+    return `<${this.tagName} class=${JSON.stringify(this.className)} ${attributes}>${this.text}${this.children.map(child => child.outerHTML).join("")}</${this.tagName}>`;
+  }
   append(...children: Element[]): void {
     for (const child of children) { child.parent = this; this.children.push(child); }
   }

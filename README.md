@@ -35,7 +35,7 @@ One shared policy applies to every valid token. Package enable alone selects no 
 
 ## Provenance and dependencies
 
-Foundation template 2 received an authorized one-time canonical four-tree refresh generated from clean committed Host SDK revision `46a95356572edc38b3381bb349c9d66ede918fd0`. `teamarness-authoring.json` records `sdkRevisionDirty:false`, Package Process 1.1, UI host 3 and four exact vendor digests. `npm run check:vendor` independently recomputes them. There is no general in-place updater. Vendor source was not hand-patched. Confirmed streams require Provider process 1.1 support; legacy setup is refused clearly, without dropping ordinary compatible calls.
+Foundation template 2 holds a canonical four-tree snapshot generated from clean committed Host revision `c798c2b93e80ca6f43aeacd68010f78210fb4446`. The PR integration refresh replaces only the generated UI SDK README's ADR reference after Gateway decisions were renumbered to 0044–0046; runtime SDK source is unchanged from the earlier `46a95356572edc38b3381bb349c9d66ede918fd0` snapshot. `teamarness-authoring.json` records `sdkRevisionDirty:false`, Package Process 1.1, UI host 3 and four exact vendor digests. `npm run check:vendor` independently recomputes them. There is no general in-place updater. Vendor source was not hand-patched. Confirmed streams require Provider process 1.1 support; legacy setup is refused clearly, without dropping ordinary compatible calls.
 
 All Rust/npm direct versions are exact. Cargo/npm lockfiles belong to this project. G-only rustix 1.1.4 (std/fs/process, default features off) was explicitly approved for safe descriptor-relative no-follow file handling and UID checks, using the already qualified Host lock version. Source notices and dual MIT/Apache licenses remain with vendored trees. New third-party crates retain their upstream licenses; see `docs/dependencies.md`.
 
@@ -53,7 +53,7 @@ Create a labeled token and transfer its one-time display to your outside client'
 
 Both views include expandable [generic onboarding](docs/onboarding.md), the same Markdown served by authenticated `/v1/onboarding`. Save this guidance without a credential. Discover identifiers, complete schemas and fresh guide bytes before calling. No Backlog-specific client adapter or model setup is needed. The 12-operation bound counts outstanding gateway SDK operations, not simultaneous Provider executions; timeouts do not require a gateway restart or prove execution stopped. At most one delayed retry is permitted only for retryable ordinary reads when current Provider guidance permits; never automatically replay catalog/auth/policy/schema refusals or uncertain outcomes.
 
-Refresh or page the catalog explicitly; each mounted view polls its displayed page, with one five-second-bounded refresh at a time and no accumulating all-Provider catalog. Closing a view cancels polling and pending observations, not Backend service. Setup and tokens survive restart/reinstall. Use **Disable and revoke all tokens** before removal when retained access is unwanted.
+Refresh or page the catalog explicitly; each mounted view polls its displayed page, with one five-second-bounded refresh at a time and no accumulating all-Provider catalog. Each admitted manual refresh shows progress and a fresh result; the refresh control stays disabled until the active read settles. Background polling does not reopen a dismissed success. Closing a view cancels polling and pending observations, not Backend service. Setup and tokens survive restart/reinstall. Use **Disable and revoke all tokens** before removal when retained access is unwanted.
 
 ## Membership and listener eligibility
 
@@ -73,11 +73,32 @@ This phase is gateway-tested, not real-Host or outside-agent acceptance. Correct
 ## Managed access coordination (Backend)
 
 Closed `setup.preview`, `setup.apply`, `setup.status` and `setup.watch` operations
-coordinate connect, repair, rotate, disconnect and selected skill installation.
+coordinate connect, repair, rotate, disconnect, selected skill installation and
+independent `install-cli`. The latter rejects folder selections, uses only the
+recognized command installer's existing journal, and never reads/locks/publishes
+ClientStore connection records, creates an origin, issues credentials or changes
+Policy. Invalid private credential history is preserved; validated unfinished
+credential work still reserves the coordinator. CLI operation feedback is
+in-memory, not a new credential Journal/Completed form. No uninstall is provided.
 Preview is read-only, accepts only an opaque folder selection, expires in ten
 minutes and is limited to four plans. Apply rechecks consent and returns an
 owned operation ID; cancelling a UI observer does not cancel accepted work.
 The native folder picker supplies a bounded mount-scoped selection lease; both views use the same coordinator controls.
+
+`setup.inspect` separately observes current CLI recognition/candidate change,
+Workspace authority/local publication, and pending/invalid credential recovery.
+It is read-only, performs disk/hash work off the async runtime, and rejects raced
+Policy revisions without hiding independently observed CLI facts. No bearer,
+private record path, origin nonce or opaque identity is returned. Connected means
+an exact current verifier/private-record pair and committed saved endpoint, not
+a running listener or the latest operation result. Missing private credentials
+require explicit replacement; intact credentials with an endpoint mismatch need
+publication repair. Tombstones never mean connected. Inspection creates no
+files, takes no mutation locks, and neither recovers nor reclaims temporary files.
+Status/watch retain their existing operation-history shape; legacy bundled
+preview/apply requests remain supported internally. Both views use one coalesced,
+revision-guarded inspection chain, not a filesystem poll or a hash on every
+progress event.
 
 Policy remains the only authorization owner. A private client operation journal
 precedes recognized outputs, verifier commit, and atomic credential/endpoint
@@ -99,11 +120,33 @@ transfer, same-version changes and collisions retain explicit refusal rules.
 See [CLI custody and recovery](docs/cli.md). All automated Backend/CLI setup
 uses injected private physical homes; installed production-home M1–M5 are pending.
 
-Managed onboarding is available in both current Package views: choose an optional
-skill folder, preview exact paths/command changes, approve, then follow separate
-command/skill/access results. Repair, rotate and disconnect use the same recoverable
-coordinator; manual tokens remain in Configuration. Closing a view cancels its picker
-and observations, not an accepted setup operation. See [native picker integration](docs/native-picker.md)
+Agent setup in both views separates **CLI**, **Workspace connection** and the
+optional **Agent skill**. Use **Install CLI** (or **Update CLI**) independently of
+credentials; there is no uninstall. Clicking Install/Update CLI prepares and applies
+that exact recognized output change immediately, with no second confirmation.
+Modified or unrelated outputs cannot be replaced here. Command path is available
+in a disclosure. Setup progress, dismissible results and errors appear above the
+buttons in their own CLI, Workspace connection or Agent skill section.
+
+Use **Connect**, **Rotate credentials**, **Disconnect** or **Repair** as offered
+by current connection facts. These named actions internally prepare and accept
+one exact plan; there is no routine Preview/checkbox/Apply screen. Connect and
+rotation require a running listener and a current issue-free CLI; setup never
+starts the listener or grants tools. Stopping the listener does not erase an
+intact connection. Missing credentials need explicit rotation; endpoint-only
+repair retains intact credentials. Revoked/disconnected access is not connected.
+Pending/invalid/conflicting state is shown separately from historical results.
+
+The optional skill helps an agent discover and use live Workspace tools. With
+the current CLI installed, **Install skill…** opens the native folder chooser;
+confirming the folder installs only the skill, and Cancel installs nothing.
+No folder is attached to credential actions. Connect, rotation and skill
+installation refuse any implicit CLI change: use Install/Update CLI first.
+Repair explicitly resumes previously accepted unfinished work. If it requires
+command publication, one short version/output confirmation resumes that reserved
+work; the separate CLI action cannot bypass it. Manual tokens
+and explicit denial recovery remain in Configuration. Closing a view cancels
+its picker and observations, not an accepted setup operation. See [native picker integration](docs/native-picker.md)
 for protocol/lifecycle limits and the still-pending installed/native qualification.
 
 Catalog refresh never sends a listener enable/port-change intent and does not

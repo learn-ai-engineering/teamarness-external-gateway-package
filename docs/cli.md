@@ -255,14 +255,15 @@ native output execution/update and real harness skill discovery remain M1/M3/M4.
 ## App-led managed setup protocol
 
 `external-gateway.setup.preview` accepts `intent` (connect, repair, rotate,
-disconnect, install-skill) and optional opaque `selectionId`. It never accepts a
+disconnect, install-skill, install-cli) and optional opaque `selectionId`. It never accepts a
 path, bearer, bytes or overwrite flag, and performs no writes. It returns the
 exact command/optional skill destination, installed/proposed command owner,
 version and digest, update disposition, skill write effect and whether credentials
 change. Explicit repair never hides an ownership transfer, downgrade or same-
 version byte change. Four
 plans expire after ten minutes. `setup.apply` accepts only `planId`, rechecks
-policy revision, running saved port, path identities and complete output digests,
+relevant Policy/listener state for credential plans, pinned path identities and
+complete output digests,
 then returns an operation ID. Repeated accepted apply discovers that operation;
 `setup.status` and `setup.watch` report secret-free command/skill/access results.
 Observer cancellation, remount and acceptance-response loss do not duplicate
@@ -344,3 +345,63 @@ Installed checks require the disposable OS account/home and M1–M5 observations
 provenance offline, before home lookup, sockets or AppKit. Like help/version it
 needs no Workspace and accepts no other options. The same native artifact retains
 these notices after managed copy or Package Directory movement.
+
+### Independent internal CLI action and current facts
+
+The typed coordinator also accepts `install-cli` through its existing exact
+preview/apply protocol, with no folder selection. This is command publication
+only, not Connect with a throwaway credential. It does not read or lock private
+connection records, create/read an origin, issue a token, modify Policy, install
+a skill, or write a credential setup completion receipt. Malformed/future or
+other-profile private records do not block it and remain untouched. Valid
+unfinished credential work and active owned work still block competing actions.
+There is no CLI uninstall action. Command-only acceptance/progress is ephemeral;
+after restart, the recognized installer receipt/journal supplies installed truth.
+Recognized command recovery is independent of private credential observation;
+failed CLI work never invokes credential recovery. If exact new command bytes
+are already published but their receipt is still unfinished after storage failure,
+restore storage and Reload the Package to reconcile them. Inspection remains
+read-only and does not offer an unusable Update CLI action for that state.
+
+The closed `external-gateway.setup.inspect` request returns three current facts:
+`cli` (recognition/path/version and candidate change), `connection` (actual
+Workspace authority and local publication), and `recovery` (pending or invalid
+credential coordinator work, not a historical failure). Its issues are bounded
+safe codes, never secrets/private credential paths/opaque identities. Output
+errors from setup preview/rechecks include only `output: command` or
+`output: skill` where the affected output is known, not arbitrary private paths.
+Inspection is a read-only observation, not a filesystem watch: it creates no
+directories, takes no mutation locks, performs no recovery or temporary cleanup,
+and runs filesystem/hash checks on blocking work. A changed/unavailable Policy
+revision makes the connection fact unavailable; it is not an atomic cross-store
+snapshot and cannot authorize a later action without fresh admission checks.
+An intact connection remains connected when the listener is stopped or after a
+skill/CLI result. Missing bearer requires explicit replacement; endpoint-only
+mismatch permits publication repair with intact credentials. Revoked/disconnected
+tombstones never regain access through inspection. An unavailable inspection does
+not prove that access stopped: existing Policy-authorized access may remain live.
+Configuration retains explicit revoke and Disable-and-revoke controls.
+Status/watch and all five legacy intents/disk forms remain unchanged. The new live CLI intent is explicitly
+invalid in credential setup Journal/Completed files, so old readers never receive
+a new durable CLI history form from this implementation.
+
+Both Package views expose these seams as direct named actions: **Install CLI** /
+**Update CLI**, **Connect**, **Rotate credentials**, **Disconnect**, **Repair**,
+and optional **Install skill…**. Routine actions internally preview then apply
+one exact plan. Clicking Install/Update CLI itself authorizes that recognized
+output change, including a same-version development rebuild; there is no second
+CLI confirmation. Unrecognized or modified outputs are refused. Progress, errors
+and dismissible results stay next to the controls in their own setup section.
+Connect, Rotate credentials and Install skill… refuse any CLI change or non-null
+CLI issue; first use the independent CLI action. A valid already accepted pending
+Repair is the narrow exception: it can resume required command publication with
+one concise version/output confirmation, because the Backend reserves those
+outputs and a separate CLI action cannot bypass that work. Unsafe/unrecognized
+outputs are still refused. Skill chooser confirmation installs only the
+skill, Cancel writes nothing, and credential actions never carry a folder
+selection. The live chooser lease lasts through acceptance. Current connection
+facts are separate from operation progress/results and listener running state;
+closing a view never cancels an accepted operation. Idle or unrelated historical
+updates cannot settle a locally submitted action. If acceptance is unknown and no
+correlated operation update arrives, reopen the view to inspect current state;
+setup never automatically retries the action. There is no CLI uninstall.

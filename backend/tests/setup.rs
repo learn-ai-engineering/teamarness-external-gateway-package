@@ -661,3 +661,58 @@ async fn explicit_preview_discloses_changed_command_bytes_and_repairs_without_to
     assert_eq!(current.bearer, old.bearer);
     h.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn repeated_connect_refuses_but_second_folder_install_preserves_managed_credentials() {
+    let f = support::Fixture::new();
+    let (mut h, s) = f.start().await;
+    support::connect(&mut h).await;
+    let original = f.connections().remove(0);
+    let policy_before = s.policy.setup_snapshot().await.unwrap().config;
+    assert_eq!(
+        h.request(
+            "external-gateway.setup.preview",
+            json!({"intent":"connect"})
+        )
+        .await
+        .unwrap_err()
+        .code(),
+        "external_gateway.managed_setup_required"
+    );
+    for _ in 0..2 {
+        let folder = tempfile::tempdir().unwrap();
+        let id = s
+            .setup
+            .register_selection(folder.path().canonicalize().unwrap())
+            .await
+            .unwrap();
+        let p = h
+            .request(
+                "external-gateway.setup.preview",
+                json!({"intent":"install-skill","selectionId":id}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(p["credentialChange"], false);
+        h.request(
+            "external-gateway.setup.apply",
+            json!({"planId":p["planId"]}),
+        )
+        .await
+        .unwrap();
+        let outcome = support::finish(&mut h).await;
+        assert_eq!(outcome["phase"], "complete");
+        assert_eq!(outcome["skill"], "installed");
+        assert_eq!(outcome["access"], "unchanged");
+        assert!(folder.path().join("teamarness/SKILL.md").is_file());
+        let current = f.connections().remove(0);
+        assert_eq!(current.token_id, original.token_id);
+        assert_eq!(current.generation, original.generation);
+        assert_eq!(current.bearer, original.bearer);
+        assert_eq!(
+            serde_json::to_value(s.policy.setup_snapshot().await.unwrap().config).unwrap(),
+            serde_json::to_value(&policy_before).unwrap()
+        );
+    }
+    h.shutdown().await.unwrap();
+}

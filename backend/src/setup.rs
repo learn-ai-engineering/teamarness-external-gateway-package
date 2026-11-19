@@ -36,6 +36,12 @@ fn disk<T>(r: std::result::Result<T, impl std::fmt::Debug>) -> Result<T> {
 fn output(e: install::InstallError) -> BackendError {
     BackendError::new(e.code(), false, json!({}))
 }
+fn command_output(e: install::InstallError) -> BackendError {
+    BackendError::new(e.code(), false, json!({"output":"command"}))
+}
+fn skill_output(e: install::InstallError) -> BackendError {
+    BackendError::new(e.code(), false, json!({"output":"skill"}))
+}
 type InitializationHome = Arc<dyn Fn(&Initialization) -> Result<PathBuf> + Send + Sync>;
 /// External OS seams only; owned stores, Policy and installers are never substituted.
 #[derive(Clone)]
@@ -155,6 +161,7 @@ pub enum Intent {
     Rotate,
     Disconnect,
     InstallSkill,
+    InstallCli,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -168,14 +175,23 @@ pub struct Apply {
     pub plan_id: String,
 }
 #[derive(Clone)]
+enum PlanAuthority {
+    CommandOnly,
+    Credential(Box<CredentialPlan>),
+}
+#[derive(Clone)]
+struct CredentialPlan {
+    revision: String,
+    connection: Option<Connection>,
+}
+#[derive(Clone)]
 struct Plan {
     selection_id: Option<String>,
     id: String,
     operation: String,
     expires: u64,
     intent: Intent,
-    revision: String,
-    connection: Option<Connection>,
+    authority: PlanAuthority,
     command: Option<CommandPlan>,
     skill: Option<SkillPlan>,
     selected: Option<Pin>,
@@ -298,6 +314,7 @@ impl Completed {
             || !identifier(&self.plan_id)
             || self.receipt.operation_id.is_none()
             || self.receipt.skill_path.is_some()
+            || self.receipt.intent == Some(Intent::InstallCli)
         {
             return Err(error("setup_state_invalid"));
         }
@@ -375,13 +392,23 @@ impl SetupCoordinator {
         });
         let runner = this.clone();
         let handle = tokio::runtime::Handle::current();
-        let recovery = tokio::task::spawn_blocking(move || runner.recover(&handle))
-            .await
-            .map_err(|_| error("setup_storage_failed"))?;
-        if let Err(e) = recovery {
+        let recovery = tokio::task::spawn_blocking(move || {
+            // Command publication has its own journal and must not depend on private credentials.
+            let command = runner
+                .installer()
+                .and_then(|i| i.recover_command().map_err(command_output));
+            let credential = runner.recover(&handle);
+            (command, credential)
+        })
+        .await
+        .map_err(|_| error("setup_storage_failed"))?;
+        if let Err(e) = recovery.1 {
             let mut m = this.memory.lock().expect("setup memory");
             m.invalid = m.pending.is_none();
             drop(m);
+            this.report_error(e);
+        }
+        if let Err(e) = recovery.0 {
             this.report_error(e);
         }
         this.refresh().await;
@@ -402,7 +429,7 @@ impl SetupCoordinator {
         Ok(s)
     }
     fn admitted(&self) -> Result<Admitted> {
-        self.admitted.clone().map_err(output)
+        self.admitted.clone().map_err(command_output)
     }
     fn state_path(&self) -> PathBuf {
         self.home
@@ -507,6 +534,183 @@ impl SetupCoordinator {
     pub(crate) fn receipt_watch(&self) -> watch::Receiver<Receipt> {
         self.status.subscribe()
     }
+    /// Current facts are an explicit bounded observation, never operation history or a
+    /// filesystem watch. No Policy owner spans disk work; reject cross-store Policy races.
+    pub async fn inspect(self: &Arc<Self>) -> Result<Value> {
+        let snapshot = self.policy.setup_snapshot().await.ok();
+        let revision = snapshot.as_ref().map(|s| s.revision.clone());
+        let origin = self.policy.read_setup_origin().await;
+        let this = self.clone();
+        let mut facts = tokio::task::spawn_blocking(move || this.inspect_disk(snapshot, origin))
+            .await
+            .map_err(|_| error("setup_storage_failed"))?;
+        let after = self.policy.setup_snapshot().await.ok().map(|s| s.revision);
+        guard_inspection(&mut facts, revision.as_deref(), after.as_deref());
+        Ok(facts)
+    }
+    fn inspect_disk(
+        &self,
+        snapshot: Option<SetupSnapshot>,
+        origin: Result<Option<String>>,
+    ) -> Value {
+        let path = self.home.join(".local/bin/tmx");
+        let cli = match self
+            .installer()
+            .and_then(|i| i.observe_command().map_err(command_output).map(|o| (i, o)))
+        {
+            Ok((installer, observation)) => {
+                let state = if observation.version.is_some() {
+                    "installed"
+                } else {
+                    "missing"
+                };
+                let candidate = self
+                    .admitted()
+                    .and_then(|a| installer.preview(&self.source, a).map_err(command_output));
+                let (change, issue) = match candidate {
+                    Ok(p) => (
+                        match p.disposition() {
+                            Disposition::Install => "install",
+                            Disposition::Unchanged => "none",
+                            Disposition::Refresh => "refresh",
+                            Disposition::ExplicitRepair => "explicit-repair",
+                        },
+                        None,
+                    ),
+                    Err(e) => ("none", Some(e.code().to_owned())),
+                };
+                json!({"state":state,"path":path,"version":observation.version,
+                    "change":if observation.pending {"explicit-repair"} else {change},
+                    "issue":if observation.published_pending {Some("external_gateway.reload_required".to_owned())} else if observation.pending {Some("external_gateway.output_repair_required".to_owned())} else {issue}})
+            }
+            Err(e) => {
+                json!({"state":if e.code() == "external_gateway.output_storage_failed" {"unavailable"} else {"blocked"},
+                "path":path,"version":null,"change":"none","issue":e.code()})
+            }
+        };
+        let pending = self.read::<Journal>(&self.journal_name).and_then(|j| {
+            if let Some(j) = &j {
+                self.validate_journal(j)?;
+            }
+            if let Some(c) = self.read::<Completed>(&self.receipt_name)? {
+                c.validate()?;
+            }
+            Ok(j)
+        });
+        let recovery = match &pending {
+            Ok(Some(j)) => json!({"state":"pending","intent":j.intent}),
+            Ok(None) => json!({"state":"none","intent":null}),
+            Err(_) => json!({"state":"invalid","intent":null}),
+        };
+        let connection = match snapshot {
+            None => connection_fact(
+                "unavailable",
+                "unavailable",
+                "none",
+                Some("external_gateway.storage_failed"),
+            ),
+            Some(s) => {
+                self.inspect_connection(&s, origin, pending.as_ref().ok().and_then(|j| j.as_ref()))
+            }
+        };
+        json!({"cli":cli,"connection":connection,"recovery":recovery})
+    }
+    fn inspect_connection(
+        &self,
+        snapshot: &SetupSnapshot,
+        origin: Result<Option<String>>,
+        pending: Option<&Journal>,
+    ) -> Value {
+        let managed = snapshot.config.managed.as_ref();
+        let authority = match managed.map(|m| &m.disposition) {
+            None => "none",
+            Some(ManagedDisposition::Current) => "current",
+            Some(ManagedDisposition::Revoked) => "revoked",
+            Some(ManagedDisposition::Disconnected) => "disconnected",
+        };
+        let records = self
+            .store()
+            .and_then(|s| s.connections().map_err(|_| error("client_store_invalid")));
+        let connection = match records {
+            Ok(records) => records
+                .into_iter()
+                .find(|c| c.workspace_id == self.workspace),
+            Err(_) => {
+                return connection_fact(
+                    "unavailable",
+                    authority,
+                    "none",
+                    Some("external_gateway.client_store_invalid"),
+                );
+            }
+        };
+        let origin = match origin {
+            Ok(origin) => origin,
+            Err(_) => {
+                return connection_fact(
+                    "unavailable",
+                    authority,
+                    "none",
+                    Some("external_gateway.storage_failed"),
+                );
+            }
+        };
+        if managed.is_some_and(|m| origin.as_ref() != Some(&m.origin_nonce))
+            || connection.as_ref().is_some_and(|c| {
+                c.installation_id != self.installation
+                    || c.continuity_id != self.continuity
+                    || origin.as_ref() != Some(&c.origin_nonce)
+                    || managed.is_none_or(|m| m.origin_nonce != c.origin_nonce)
+            })
+        {
+            return connection_fact(
+                "conflict",
+                authority,
+                "none",
+                Some("external_gateway.connection_origin_conflict"),
+            );
+        }
+        if let Some(j) = pending {
+            return connection_fact(
+                "needs-repair",
+                authority,
+                if j.intent == Intent::Disconnect {
+                    "cleanup"
+                } else {
+                    "resume"
+                },
+                Some("external_gateway.setup_repair_required"),
+            );
+        }
+        let Some(m) = managed.filter(|m| m.disposition == ManagedDisposition::Current) else {
+            return connection_fact("not-connected", authority, "none", None);
+        };
+        let Some(c) = connection.filter(|c| {
+            c.token_id == m.token_id
+                && c.generation == m.generation
+                && snapshot.config.tokens.iter().any(|t| {
+                    t.id == m.token_id
+                        && t.generation == m.generation
+                        && tokens::verify(t, &c.bearer)
+                })
+        }) else {
+            return connection_fact(
+                "needs-repair",
+                authority,
+                "replace-credentials",
+                Some("external_gateway.credential_consent_required"),
+            );
+        };
+        if snapshot.config.port != Some(c.port) || c.operation_id != m.operation_id {
+            return connection_fact(
+                "needs-repair",
+                authority,
+                "publication",
+                Some("external_gateway.publication_required"),
+            );
+        }
+        connection_fact("connected", authority, "none", None)
+    }
     pub async fn status(&self) -> Value {
         let mut r = self.status.borrow().clone();
         if r.access == "configured" {
@@ -562,7 +766,7 @@ impl SetupCoordinator {
             let mut m = self.memory.lock().expect("setup memory");
             m.plans
                 .retain(|p| p.expires > self.environment.clock.seconds());
-            if m.invalid {
+            if m.invalid && request.intent != Intent::InstallCli {
                 return Err(error("setup_state_invalid"));
             }
             if m.admission || m.plans.len() >= 4 {
@@ -570,6 +774,9 @@ impl SetupCoordinator {
             }
             if m.pending.is_some() && request.intent != Intent::Repair {
                 return Err(error("setup_repair_required"));
+            }
+            if request.intent == Intent::InstallCli && request.selection_id.is_some() {
+                return Err(error("bad_request"));
             }
             request
                 .selection_id
@@ -588,13 +795,19 @@ impl SetupCoordinator {
         if request.intent == Intent::Disconnect && selected.is_some() {
             return Err(error("bad_request"));
         }
-        let snapshot = self.policy.setup_snapshot().await?;
+        let snapshot = if request.intent == Intent::InstallCli {
+            None
+        } else {
+            Some(self.policy.setup_snapshot().await?)
+        };
         let this = self.clone();
-        let mut plan =
-            tokio::task::spawn_blocking(move || this.make_plan(request.intent, selected, snapshot))
-                .await
-                .map_err(|_| error("setup_storage_failed"))??;
-        let result = json!({"planId":plan.id,"intent":plan.intent,"commandPath":self.home.join(".local/bin/tmx"),"skillPath":plan.skill.as_ref().map(|s|s.destination()),"credentialChange":plan.credential_change,"commandChange":plan.command.as_ref().map(|c|c.summary().map_err(output)).transpose()?,"skillChange":plan.skill.as_ref().map(|s|if s.unchanged(){"unchanged"}else{"publish"}).unwrap_or("not-requested")});
+        let mut plan = tokio::task::spawn_blocking(move || match snapshot {
+            Some(snapshot) => this.make_plan(request.intent, selected, snapshot),
+            None => this.make_cli_plan(),
+        })
+        .await
+        .map_err(|_| error("setup_storage_failed"))??;
+        let result = json!({"planId":plan.id,"intent":plan.intent,"commandPath":self.home.join(".local/bin/tmx"),"skillPath":plan.skill.as_ref().map(|s|s.destination()),"credentialChange":plan.credential_change,"commandChange":plan.command.as_ref().map(|c|c.summary().map_err(command_output)).transpose()?,"skillChange":plan.skill.as_ref().map(|s|if s.unchanged(){"unchanged"}else{"publish"}).unwrap_or("not-requested")});
         let mut m = self.memory.lock().expect("setup memory");
         if m.admission || m.plans.len() >= 4 {
             return Err(error("busy"));
@@ -610,6 +823,40 @@ impl SetupCoordinator {
         plan.selection_id = request.selection_id;
         m.plans.push(plan);
         Ok(result)
+    }
+    /// Invalid credential history is preserved, not installer authority. Only validated
+    /// unfinished accepted work may reserve the shared coordinator/output requirements.
+    fn check_cli_pending(&self) -> Result<()> {
+        if self.memory.lock().expect("setup memory").pending.is_some() {
+            return Err(error("setup_repair_required"));
+        }
+        if let Ok(Some(j)) = self.read::<Journal>(&self.journal_name)
+            && self.validate_journal(&j).is_ok()
+        {
+            return Err(error("setup_repair_required"));
+        }
+        Ok(())
+    }
+    fn make_cli_plan(&self) -> Result<Plan> {
+        self.check_cli_pending()?;
+        let command = self
+            .installer()?
+            .preview(&self.source, self.admitted()?)
+            .map_err(command_output)?;
+        let id = random_id()?;
+        Ok(Plan {
+            selection_id: None,
+            operation: id.clone(),
+            id,
+            expires: self.environment.clock.seconds() + TEN_MINUTES,
+            intent: Intent::InstallCli,
+            authority: PlanAuthority::CommandOnly,
+            command: Some(command),
+            skill: None,
+            selected: None,
+            credential_change: false,
+            resume: None,
+        })
     }
     fn make_plan(
         &self,
@@ -642,7 +889,7 @@ impl SetupCoordinator {
             Some(
                 installer
                     .preview(&self.source, admission.clone())
-                    .map_err(output)?,
+                    .map_err(command_output)?,
             )
         };
         let connections = self
@@ -710,7 +957,7 @@ impl SetupCoordinator {
             .map(|p| {
                 SkillInstaller::new(&installer)
                     .preview(&p.path, admission.clone())
-                    .map_err(output)
+                    .map_err(skill_output)
             })
             .transpose()?;
         let id = random_id()?;
@@ -724,8 +971,10 @@ impl SetupCoordinator {
             operation,
             expires: self.environment.clock.seconds() + TEN_MINUTES,
             intent,
-            revision: snapshot.revision,
-            connection,
+            authority: PlanAuthority::Credential(Box::new(CredentialPlan {
+                revision: snapshot.revision,
+                connection,
+            })),
             command,
             skill,
             selected,
@@ -760,13 +1009,28 @@ impl SetupCoordinator {
         let this = self.clone();
         let (send, recv) = tokio::sync::oneshot::channel();
         let task = tokio::spawn(async move {
+            let command_only = matches!(plan.authority, PlanAuthority::CommandOnly);
             let result = this.accept_and_run(plan, send).await;
             if let Err(e) = result {
-                let runner = this.clone();
-                let rt = tokio::runtime::Handle::current();
-                let recovered = tokio::task::spawn_blocking(move || runner.recover(&rt)).await;
-                if !matches!(recovered, Ok(Ok(()))) || this.status.borrow().phase != "complete" {
+                if command_only {
+                    // Never enter credential recovery for an independent output failure.
+                    let runner = this.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        runner
+                            .installer()?
+                            .recover_command()
+                            .map_err(command_output)
+                    })
+                    .await;
                     this.report_error(e);
+                } else {
+                    let runner = this.clone();
+                    let rt = tokio::runtime::Handle::current();
+                    let recovered = tokio::task::spawn_blocking(move || runner.recover(&rt)).await;
+                    if !matches!(recovered, Ok(Ok(()))) || this.status.borrow().phase != "complete"
+                    {
+                        this.report_error(e);
+                    }
                 }
             }
             this.memory.lock().expect("setup memory").admission = false;
@@ -781,40 +1045,49 @@ impl SetupCoordinator {
     ) -> Result<()> {
         let this = self.clone();
         let checked = plan.clone();
-        let snap = match self.policy.setup_snapshot().await {
-            Ok(s) => s,
-            Err(e) => {
-                let _ = send.send(Err(e));
-                return Ok(());
-            }
+        let snap = match &plan.authority {
+            PlanAuthority::CommandOnly => None,
+            PlanAuthority::Credential(_) => match self.policy.setup_snapshot().await {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    let _ = send.send(Err(e));
+                    return Ok(());
+                }
+            },
         };
         let check = tokio::task::spawn_blocking(move || {
-            if snap.revision != checked.revision
-                || (checked.intent != Intent::Disconnect
-                    && checked.intent != Intent::InstallSkill
-                    && !checked.resume.as_ref().is_some_and(|j| {
-                        matches!(j.intent, Intent::Disconnect | Intent::InstallSkill)
-                    })
-                    && !snap.running)
+            if let (Some(snap), PlanAuthority::Credential(credential)) = (&snap, &checked.authority)
+                && (snap.revision != credential.revision
+                    || (checked.intent != Intent::Disconnect
+                        && checked.intent != Intent::InstallSkill
+                        && !checked.resume.as_ref().is_some_and(|j| {
+                            matches!(j.intent, Intent::Disconnect | Intent::InstallSkill)
+                        })
+                        && !snap.running))
             {
                 return Err(error("setup_preview_stale"));
             }
             let i = this.installer()?;
             if let Some(c) = &checked.command {
-                c.recheck(&i).map_err(output)?;
+                c.recheck(&i).map_err(command_output)?;
             }
             if let Some(s) = &checked.skill {
-                s.recheck(&i, this.admitted()?).map_err(output)?;
+                s.recheck(&i, this.admitted()?).map_err(skill_output)?;
             }
-            if this
-                .store()?
-                .connections()
-                .map_err(|_| error("client_store_invalid"))?
-                .into_iter()
-                .find(|c| c.workspace_id == this.workspace)
-                != checked.connection
-            {
-                return Err(error("setup_preview_stale"));
+            match &checked.authority {
+                PlanAuthority::CommandOnly => this.check_cli_pending()?,
+                PlanAuthority::Credential(credential) => {
+                    if this
+                        .store()?
+                        .connections()
+                        .map_err(|_| error("client_store_invalid"))?
+                        .into_iter()
+                        .find(|c| c.workspace_id == this.workspace)
+                        != credential.connection
+                    {
+                        return Err(error("setup_preview_stale"));
+                    }
+                }
             }
             Ok(())
         })
@@ -854,7 +1127,7 @@ impl SetupCoordinator {
                 "not-requested"
             }
             .into(),
-            access: if plan.intent == Intent::InstallSkill {
+            access: if matches!(plan.intent, Intent::InstallSkill | Intent::InstallCli) {
                 "unchanged"
             } else {
                 "pending"
@@ -878,11 +1151,34 @@ impl SetupCoordinator {
     fn run(&self, plan: Plan, receipt: Receipt, rt: &tokio::runtime::Handle) -> Result<()> {
         let installer = self.installer()?;
         if let Some(c) = &plan.command {
-            c.recheck(&installer).map_err(output)?;
+            c.recheck(&installer).map_err(command_output)?;
         }
         if let Some(s) = &plan.skill {
-            s.recheck(&installer, self.admitted()?).map_err(output)?;
+            s.recheck(&installer, self.admitted()?)
+                .map_err(skill_output)?;
         }
+        if matches!(plan.authority, PlanAuthority::CommandOnly) {
+            self.check_cli_pending()?;
+            let command = plan
+                .command
+                .as_ref()
+                .ok_or_else(|| error("setup_preview_stale"))?;
+            installer
+                .apply(command, Approval::Explicit)
+                .map_err(command_output)?;
+            let mut receipt = receipt;
+            receipt.phase = "complete".into();
+            receipt.command = "installed".into();
+            self.publish(receipt);
+            return Ok(());
+        }
+        let PlanAuthority::Credential(credential) = &plan.authority else {
+            unreachable!()
+        };
+        let CredentialPlan {
+            revision,
+            connection: observed_connection,
+        } = credential.as_ref();
         let store = self.store()?;
         let mutation = disk(store.lock())?;
         if mutation
@@ -890,7 +1186,7 @@ impl SetupCoordinator {
             .map_err(|_| error("client_store_invalid"))?
             .into_iter()
             .find(|c| c.workspace_id == self.workspace)
-            != plan.connection
+            != *observed_connection
         {
             return Err(error("setup_preview_stale"));
         }
@@ -907,7 +1203,7 @@ impl SetupCoordinator {
             c.validate()?;
         }
         let snapshot = rt.block_on(self.policy.setup_snapshot())?;
-        if snapshot.revision != plan.revision {
+        if snapshot.revision != *revision {
             return Err(error("setup_preview_stale"));
         }
         let mut j = if let Some(j) = plan.resume.clone() {
@@ -997,7 +1293,7 @@ impl SetupCoordinator {
                     operation_id: plan.operation.clone(),
                 })
             } else {
-                plan.connection.clone().map(|mut c| {
+                observed_connection.clone().map(|mut c| {
                     if let Some(port) = snapshot.config.port {
                         c.port = port;
                     }
@@ -1013,10 +1309,10 @@ impl SetupCoordinator {
                 plan_id: plan.id.clone(),
                 operation: plan.operation.clone(),
                 intent: plan.intent,
-                revision: plan.revision.clone(),
+                revision: revision.clone(),
                 policy_digest: snapshot.durable_revision.clone(),
                 connection,
-                old_connection: plan.connection.clone(),
+                old_connection: observed_connection.clone(),
                 association,
                 record,
                 admission: self.admitted()?,
@@ -1028,7 +1324,7 @@ impl SetupCoordinator {
             }
         };
         j.plan_id = plan.id.clone();
-        j.revision = plan.revision.clone();
+        j.revision = revision.clone();
         j.receipt.phase = "prepared".into();
         self.save_journal(&j)?;
         self.checkpoint(Transition::Prepared)?;
@@ -1038,18 +1334,20 @@ impl SetupCoordinator {
                 .as_ref()
                 .ok_or_else(|| error("conflict"))?
                 .after_preparation(&installer)
-                .map_err(output)?;
+                .map_err(command_output)?;
             installer
                 .apply(&command, Approval::Explicit)
-                .map_err(output)?;
+                .map_err(command_output)?;
             j.command_done = true;
             j.receipt.command = "installed".into();
             self.save_journal(&j)?;
             if let Some(s) = &plan.skill {
                 let s = s
                     .after_preparation(&installer, self.admitted()?)
-                    .map_err(output)?;
-                SkillInstaller::new(&installer).apply(&s).map_err(output)?;
+                    .map_err(skill_output)?;
+                SkillInstaller::new(&installer)
+                    .apply(&s)
+                    .map_err(skill_output)?;
                 j.skill_done = true;
                 j.receipt.skill = "installed".into();
                 self.save_journal(&j)?;
@@ -1148,7 +1446,8 @@ impl SetupCoordinator {
     }
     fn validate_journal(&self, j: &Journal) -> Result<()> {
         j.receipt.validate()?;
-        if j.format_version != 1
+        if j.intent == Intent::InstallCli
+            || j.format_version != 1
             || !identifier(&j.operation)
             || !identifier(&j.plan_id)
             || !identifier(&j.revision)
@@ -1241,9 +1540,11 @@ impl SetupCoordinator {
             let mutation = disk(store.lock())?;
             let installer = self.installer()?;
             if j.intent != Intent::Disconnect {
-                installer.recover_command().map_err(output)?;
+                installer.recover_command().map_err(command_output)?;
                 if j.selected.is_some() {
-                    SkillInstaller::new(&installer).recover().map_err(output)?;
+                    SkillInstaller::new(&installer)
+                        .recover()
+                        .map_err(skill_output)?;
                 }
                 if installer
                     .preview(&self.source, j.admission.clone())
@@ -1322,7 +1623,7 @@ impl SetupCoordinator {
         // Receipt recognition plus exact proposed bytes; merely existing output is not enough.
         let p = installer
             .preview(&installer.command_path(), j.admission.clone())
-            .map_err(output)?;
+            .map_err(command_output)?;
         if p.disposition() != Disposition::Unchanged {
             return Err(error("output_repair_required"));
         }
@@ -1330,7 +1631,7 @@ impl SetupCoordinator {
             selected.check().map_err(output)?;
             if !SkillInstaller::new(installer)
                 .preview(&selected.path, j.admission.clone())
-                .map_err(output)?
+                .map_err(skill_output)?
                 .unchanged()
             {
                 return Err(error("output_repair_required"));
@@ -1350,7 +1651,9 @@ impl SetupCoordinator {
                 .preview(&this.source, this.admitted()?)
                 .map_err(output)?;
             if p.disposition() != Disposition::Install {
-                installer.apply(&p, Approval::Automatic).map_err(output)?;
+                installer
+                    .apply(&p, Approval::Automatic)
+                    .map_err(command_output)?;
             }
             Ok::<_, BackendError>(())
         })
@@ -1378,8 +1681,46 @@ impl SetupCoordinator {
         self.stopped.store(false, Ordering::SeqCst);
     }
 }
+fn guard_inspection(facts: &mut Value, before: Option<&str>, after: Option<&str>) {
+    if before.is_none() || before != after {
+        facts["connection"] = connection_fact(
+            "unavailable",
+            "unavailable",
+            "none",
+            Some("external_gateway.unavailable"),
+        );
+    }
+}
+fn connection_fact(state: &str, authority: &str, repair: &str, issue: Option<&str>) -> Value {
+    json!({"state":state,"authority":authority,"repair":repair,"issue":issue})
+}
 fn random_id() -> Result<String> {
     let mut b = [0; 32];
     getrandom::fill(&mut b).map_err(|_| error("unavailable"))?;
     Ok(install::hex(&b))
+}
+
+#[cfg(test)]
+mod inspection_tests {
+    use super::*;
+    #[test]
+    fn policy_revision_guard_rejects_raced_or_unavailable_connection_without_hiding_cli() {
+        let original = json!({"cli":{"state":"installed"}, "connection":connection_fact("connected", "current", "none", None), "recovery":{"state":"none","intent":null}});
+        let mut equal = original.clone();
+        guard_inspection(&mut equal, Some("before"), Some("before"));
+        assert_eq!(equal, original);
+        for (before, after) in [
+            (Some("before"), Some("after")),
+            (Some("before"), None),
+            (None, Some("after")),
+            (None, None),
+        ] {
+            let mut facts = original.clone();
+            guard_inspection(&mut facts, before, after);
+            assert_eq!(facts["connection"]["state"], "unavailable");
+            assert_eq!(facts["connection"]["authority"], "unavailable");
+            assert_eq!(facts["cli"], original["cli"]);
+            assert_eq!(facts["recovery"], original["recovery"]);
+        }
+    }
 }

@@ -4,13 +4,13 @@
   "uiHostVersion": 3,
   "sdkSource": "vendored-from-teamarness-checkout",
   "sdkUpgrade": "unsupported-in-place",
-  "sdkRevision": "46a95356572edc38b3381bb349c9d66ede918fd0",
+  "sdkRevision": "c798c2b93e80ca6f43aeacd68010f78210fb4446",
   "sdkRevisionDirty": false,
   "vendorDigests": {
     "package-contract": "sha256:cb616dfc36d5935b4c21dee498e34218b44b73b44be9c7c47ae62d497599d40d",
     "package-protocol": "sha256:25a8489a546c50f5ed583948d93199a173bae053ddaf17ea8976e85bfdd601c5",
     "package-sdk": "sha256:2c26f75486a5048551f33e1568cad7e74514056addbe4b090c8ad6cc1dfa844b",
-    "package-ui-sdk": "sha256:d61ff23177dc7b3b5d8f409e13d136011dfd28e5e6bcb6de840068a455cedf3e"
+    "package-ui-sdk": "sha256:08f123299852ba4a6461387924bbd339a48f3d3fe7eecde39ecb59a9c727e99d"
   },
   "requestNamespace": "external-gateway"
 }

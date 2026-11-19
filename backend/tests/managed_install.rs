@@ -142,6 +142,7 @@ fn collisions_and_unknown_receipts_are_never_overwritten_even_explicitly() {
         "unrelated",
         "altered",
         "missing",
+        "missing-command",
         "future",
         "malformed",
         "duplicate-key",
@@ -162,6 +163,7 @@ fn collisions_and_unknown_receipts_are_never_overwritten_even_explicitly() {
             }
             "altered" => fs::write(&command, b"user modified").unwrap(),
             "missing" => fs::remove_file(&receipt).unwrap(),
+            "missing-command" => fs::remove_file(&command).unwrap(),
             "future" => fs::write(
                 &receipt,
                 fs::read_to_string(&receipt)
@@ -194,15 +196,16 @@ fn collisions_and_unknown_receipts_are_never_overwritten_even_explicitly() {
             }
             _ => unreachable!(),
         }
-        let before = fs::read(&command).unwrap();
+        let before = fs::read(&command).ok();
         let r = fs::read(&receipt).ok();
         let i = ManagedInstaller::for_home(&home).unwrap();
+        assert!(i.observe_command().is_err(), "{kind}");
         assert!(
             i.preview(&source, admitted(&source, "1.1.0", "installation-a"))
                 .is_err(),
             "{kind}"
         );
-        assert_eq!(fs::read(command).unwrap(), before, "{kind}");
+        assert_eq!(fs::read(command).ok(), before, "{kind}");
         assert_eq!(fs::read(receipt).ok(), r, "{kind}");
     }
 }
@@ -288,6 +291,26 @@ fn every_durable_boundary_restarts_only_from_exact_old_or_new_bytes() {
         let actual = fs::read(i.command_path()).unwrap();
         let new = fs::read(&source).unwrap();
         assert!(actual == old || actual == new);
+        let journal_before = fs::read(state(&home).join("command.journal")).ok();
+        let receipt_before = fs::read(state(&home).join("command.receipt")).unwrap();
+        let observation = i.observe_command().unwrap();
+        assert_eq!(
+            observation.version.as_deref(),
+            Some(if actual == new { "1.1.0" } else { "1.0.0" })
+        );
+        assert_eq!(observation.pending, journal_before.is_some());
+        assert_eq!(
+            observation.published_pending,
+            journal_before.is_some() && actual == new
+        );
+        assert_eq!(
+            fs::read(state(&home).join("command.journal")).ok(),
+            journal_before
+        );
+        assert_eq!(
+            fs::read(state(&home).join("command.receipt")).unwrap(),
+            receipt_before
+        );
         let recovery = i.recover_command().unwrap();
         if actual == new {
             assert!(

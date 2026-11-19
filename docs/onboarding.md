@@ -45,7 +45,15 @@ The embedded portable skill uses a safely quoted absolute command, not raw HTTP
 or copied Provider contracts. Managed command/selected-skill publication modules
 do not by themselves authorize access; the typed Backend setup coordinator
 previews consent, commits managed authority through Policy and publishes private
-client access. The Package-owned native folder picker supplies a mount-scoped selection; both UI views share setup controls. Cancelling an
+client access. Both Package views separate Install CLI / Update CLI, current Workspace connection
+and optional Install skill… actions. The skill helps an agent discover live tools;
+confirming its native folder chooser installs only the skill, and Cancel installs
+nothing. Connect / Rotate credentials require a current CLI and running listener;
+they never install the CLI or attach a skill folder. Disconnect revokes before
+local cleanup. Repair resumes previously accepted unfinished work. Current
+connection facts remain separate from the listener and historical operation
+results. The Package-owned native picker retains its mount-scoped lease through
+skill acceptance; routine named actions prepare/apply their exact plans internally. Cancelling an
 observer does not undo accepted work; inspect status and repair partial effects.
 Managed rotation uses the coordinator, never manual one-time regeneration.
 Disconnect revokes before local cleanup; local deletion alone is not revocation.
