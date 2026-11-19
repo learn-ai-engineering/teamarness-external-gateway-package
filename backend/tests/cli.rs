@@ -42,13 +42,14 @@ async fn target_required_even_for_one_workspace() {
 }
 #[tokio::test]
 async fn id_wins_and_exact_names_must_be_unique() {
-    use teamarness_generated_package_backend::client_store::ClientStore;
-    let f = Fixture::new(vec![response(MANIFEST.as_bytes())]).await;
-    let store = ClientStore::for_home(&f.home.path().canonicalize().unwrap()).unwrap();
-    store.publish(&connection("workspace-b", "Acme")).unwrap();
-    store
-        .publish(&connection("workspace-c", "workspace-a"))
-        .unwrap();
+    let f = Fixture::with_connections(
+        vec![response(MANIFEST.as_bytes())],
+        vec![
+            connection("workspace-b", "Acme"),
+            connection("workspace-c", "workspace-a"),
+        ],
+    )
+    .await;
     let ambiguous = f.run(&["--workspace", "Acme", "status"]).await;
     assert_eq!(ambiguous.exit, 2);
     assert_eq!(
@@ -169,7 +170,7 @@ fn native_entry_modes_never_fall_back_to_host_stdio() {
     assert!(helper.stderr.is_empty());
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("tmx");
-    std::fs::copy(exe, &copy).unwrap();
+    copy_executable(exe.as_ref(), &copy);
     let out = Command::new(copy)
         .current_dir(dir.path())
         .env_clear()
@@ -481,7 +482,7 @@ fn skill_is_offline_rendered_for_the_canonical_invoked_executable() {
     let folder = dir.path().join("it's a dir");
     std::fs::create_dir(&folder).unwrap();
     let copy = folder.join("tmx");
-    std::fs::copy(exe, &copy).unwrap();
+    copy_executable(exe.as_ref(), &copy);
     let canonical = copy.canonicalize().unwrap();
     #[cfg(target_os = "macos")]
     assert_ne!(canonical, copy);
@@ -551,7 +552,7 @@ fn skill_refuses_extra_arguments_and_unquotable_executable_paths() {
     let folder = dir.path().join("control\u{1}dir");
     std::fs::create_dir(&folder).unwrap();
     let copy = folder.join("tmx");
-    std::fs::copy(exe, &copy).unwrap();
+    copy_executable(exe.as_ref(), &copy);
     let output = Command::new(&copy)
         .arg("--skill")
         .env_clear()
@@ -602,4 +603,17 @@ fn embedded_literal_notice_checksums_are_intact() {
         count += 1;
     }
     assert_eq!(count, 83);
+}
+/// Copies an executable through a separate `cp` process, so this multi-threaded test
+/// process never holds a write descriptor to it. On Linux a child that a parallel test
+/// thread is spawning inherits such a descriptor until it execs, and running the copy
+/// meanwhile fails with ETXTBSY ("Text file busy").
+fn copy_executable(from: &std::path::Path, to: &std::path::Path) {
+    let status = std::process::Command::new("/bin/cp")
+        .arg("--")
+        .args([from, to])
+        .env_clear()
+        .status()
+        .unwrap();
+    assert!(status.success(), "copy executable fixture");
 }

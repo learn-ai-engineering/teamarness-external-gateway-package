@@ -27,6 +27,19 @@ pub fn create_private_dir(path: impl AsRef<std::path::Path>) -> std::io::Result<
     use std::os::unix::fs::DirBuilderExt;
     std::fs::DirBuilder::new().mode(0o700).create(path)
 }
+/// Copies an executable through a separate `cp` process, so this multi-threaded test
+/// process never holds a write descriptor to it. On Linux a child that a parallel test
+/// thread is spawning inherits such a descriptor until it execs, and running the copy
+/// meanwhile fails with ETXTBSY ("Text file busy").
+pub fn copy_executable(from: &std::path::Path, to: &std::path::Path) {
+    let status = std::process::Command::new("/bin/cp")
+        .arg("--")
+        .args([from, to])
+        .env_clear()
+        .status()
+        .unwrap();
+    assert!(status.success(), "copy executable fixture");
+}
 /// Writes a file with an explicit owner-only mode, as the Host admits Backend bytes.
 pub fn write_private(path: &std::path::Path, bytes: &[u8]) {
     use std::os::unix::fs::PermissionsExt;

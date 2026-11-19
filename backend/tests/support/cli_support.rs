@@ -53,12 +53,22 @@ impl Drop for Fixture {
 }
 impl Fixture {
     pub async fn new(replies: Vec<Vec<u8>>) -> Self {
+        Self::with_connections(replies, vec![]).await
+    }
+    /// Publishes `workspace-a` and any `extra` records under one store lock. On Linux a
+    /// child that a parallel test thread is spawning inherits the lock descriptor until it
+    /// execs, so an immediate second nonblocking lock could spuriously refuse.
+    pub async fn with_connections(replies: Vec<Vec<u8>>, extra: Vec<Connection>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let home = private_home();
         let store = ClientStore::for_home(&home.path().canonicalize().unwrap()).unwrap();
         let mut c = connection("workspace-a", "Acme");
         c.port = listener.local_addr().unwrap().port();
-        store.publish(&c).unwrap();
+        let mutation = store.lock().unwrap();
+        for record in std::iter::once(&c).chain(&extra) {
+            mutation.publish(record, None).unwrap();
+        }
+        drop(mutation);
         let count = Arc::new(AtomicUsize::new(0));
         let requests = Arc::new(std::sync::Mutex::new(vec![]));
         let (n, r) = (count.clone(), requests.clone());

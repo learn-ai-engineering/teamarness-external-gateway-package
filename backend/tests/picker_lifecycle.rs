@@ -47,8 +47,8 @@ fn executable() -> PathBuf {
 fn fixture(mode: &str) -> support::Fixture {
     let mut f = support::Fixture::new();
     f.source = f.data.path().canonicalize().unwrap().join(mode);
-    std::fs::copy(executable(), &f.source).unwrap();
-    // Owner-only, as the Host admits Backend bytes; `copy` keeps Cargo's build-umask mode.
+    support::copy_executable(&executable(), &f.source);
+    // Owner-only, as the Host admits Backend bytes; the copy keeps Cargo's build-umask mode.
     std::fs::set_permissions(
         &f.source,
         std::os::unix::fs::PermissionsExt::from_mode(0o700),

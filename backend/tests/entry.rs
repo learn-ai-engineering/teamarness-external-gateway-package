@@ -381,7 +381,15 @@ fn copied_fixture_tmx_uses_only_explicit_child_home_and_shared_cli_logic() {
     // The skill names the canonical invoked copy, never the managed home path it was copied from.
     let moved = root.join("agent's fixture dir");
     std::fs::create_dir(&moved).unwrap();
-    std::fs::copy(&copy, moved.join("tmx")).unwrap();
+    // A separate `cp` process: this test process never holds a write descriptor to an
+    // executable it runs, which a parallel test's spawning child could inherit (ETXTBSY).
+    let status = std::process::Command::new("/bin/cp")
+        .arg("--")
+        .args([&copy, &moved.join("tmx")])
+        .env_clear()
+        .status()
+        .unwrap();
+    assert!(status.success());
     let expected = include_str!("../resources/teamarness/SKILL.md").replace(
         "{{COMMAND}}",
         &format!(
