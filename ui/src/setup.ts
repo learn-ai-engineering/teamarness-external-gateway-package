@@ -7,12 +7,19 @@ export type SetupIntent = Preview["request"]["intent"];
 /** Observation belongs to this view; accepted apply belongs to the Backend, not this mount. */
 export function setupView(root: HTMLElement, client: TypedPackageClient<PackageContract>, refreshPolicy: () => void = () => {}) {
   const section = node("section"); section.setAttribute("aria-label", "Managed setup");
-  const choices = node("fieldset");
-  const activity = node("p"); activity.setAttribute("aria-live", "polite");
+  const choices = node("section");
   const confirmation = node("section"); const destination = node("section");
-  const error = node("p"); error.setAttribute("role", "alert");
-  const progress = notification("Setup notification");
-  section.append(choices, destination, confirmation, activity, progress.element, error); root.append(section);
+  const makeFeedback = (name: string) => {
+    const activity = node("p"); activity.setAttribute("aria-live", "polite");
+    const error = node("p"); error.setAttribute("role", "alert");
+    const progress = notification(name); progress.element.hidden = true;
+    return { activity, error, progress };
+  };
+  const feedback = { cli: makeFeedback("CLI notification"), connection: makeFeedback("Connection notification"), skill: makeFeedback("Skill notification") };
+  const partFor = (intent: SetupIntent | null | undefined) => intent === "install-cli" ? "cli" : intent === "install-skill" ? "skill" : "connection";
+  let { activity, error, progress } = feedback.connection;
+  const useFeedback = (intent: SetupIntent) => { ({ activity, error, progress } = feedback[partFor(intent)]); };
+  section.append(choices); root.append(section);
   const pending = new AbortController();
   let alive = true; let busy = false; let observing = false; let submitting = false;
   // Local submission ownership is not operation history: idle/old watch values cannot settle it.
@@ -83,13 +90,15 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
     choices.replaceChildren(); destination.replaceChildren();
     const cli = node("section"); const connection = node("section"); const skill = node("section");
     cli.className = connection.className = skill.className = "setup-part";
+    cli.setAttribute("aria-label", "CLI setup"); connection.setAttribute("aria-label", "Workspace connection setup"); skill.setAttribute("aria-label", "Agent skill setup");
     const cliLabel = !facts ? inspectionFailed ? "Status unavailable" : "Checking…" : facts.cli.state === "missing" ? "Not installed" : facts.cli.state === "installed" ? "Installed" : facts.cli.state === "blocked" ? "Needs attention" : "Status unavailable";
     cli.append(node("h3", `CLI: ${cliLabel}`));
     if (facts) {
-      if (facts.cli.version) cli.append(node("small", `Version ${facts.cli.version}${facts.cli.change === "refresh" ? " · update available" : ""}`));
+      if (facts.cli.version) cli.append(node("small", `Version ${facts.cli.version}${facts.cli.change !== "none" && !facts.cli.issue ? " · update available" : ""}`));
       const path = node("details"); path.append(node("summary", "Command path"), node("code", facts.cli.path)); cli.append(path);
       if (facts.cli.issue) cli.append(node("p", facts.recovery.state === "pending" && facts.cli.issue === "external_gateway.output_repair_required" ? "The required CLI output belongs to unfinished setup. Use Repair below to resume it." : issueText(facts.cli.issue) ?? "CLI status is unavailable. Check installation before continuing."));
     }
+    cli.append(feedback.cli.progress.element, feedback.cli.activity, feedback.cli.error);
     const cliButton = action(facts?.cli.state === "missing" ? "Install CLI" : "Update CLI", () => { void runIntent("install-cli"); }, blocked() || !canRun("install-cli")); cliButton.className = "setup-button";
     if (!facts || facts.cli.change !== "none" || facts.cli.state !== "installed") cli.append(cliButton);
     let connectionLabel = inspectionFailed ? "Status unavailable" : "Checking…";
@@ -102,6 +111,7 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
       if (facts.recovery.state === "pending") connection.append(node("p", "There is unfinished setup work. Repair resumes the previously accepted changes, including any credential changes and selected skill output."));
       if (facts.recovery.state === "invalid") connection.append(node("p", "Saved setup recovery is unavailable or invalid. Existing data has not been reset."));
     } else connection.append(node("h3", `Workspace connection: ${connectionLabel}`));
+    connection.append(feedback.connection.progress.element, feedback.connection.activity, feedback.connection.error, confirmation);
     const c = facts?.connection;
     const add = (label: string, intent: SetupIntent) => { const button = action(label, () => { void runIntent(intent); }, blocked() || !canRun(intent)); button.className = "setup-button"; connection.append(button); };
     if (!facts || c?.state === "not-connected" && facts.recovery.state === "none" || c?.state === "unavailable" && c.authority !== "current") add("Connect", "connect");
@@ -111,14 +121,16 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
     }
     if (facts && (facts.recovery.state === "pending" || ["publication", "resume", "cleanup"].includes(facts.connection.repair))) add("Repair", "repair");
     skill.append(node("h3", "Agent skill (optional)"), node("p", "The skill helps your agent discover and use live Workspace tools through the CLI. Install it in a folder your agent reads; no credentials are included."));
+    skill.append(feedback.skill.progress.element, feedback.skill.activity, feedback.skill.error);
     const install = action("Install skill…", () => { void choose(); }, blocked() || !canRun("install-skill")); install.className = "setup-button"; skill.append(install);
     if (facts && !cliReady()) skill.append(node("small", facts.recovery.state === "pending" ? "Finish unfinished setup with Repair before installing another skill." : "Install or update CLI first. No CLI or credential changes are included in skill installation."));
+    skill.append(destination);
     choices.append(cli, connection, skill);
     if (picking || selection) {
       destination.append(node("p", selection ? `Installing skill in ${selection.path}…` : "Choose a folder in the native dialog. Cancelling installs nothing."));
       if (!submitting) destination.append(action("Cancel folder selection", () => { actionRevision++; closePicker(); busy = false; activity.textContent = ""; render(); }));
     }
-    choices.disabled = busy || observing || unsettled();
+    choices.setAttribute("aria-busy", String(busy || observing || unsettled()));
   }
   function closePicker() {
     pickerRevision++; picking = false; selection = undefined;
@@ -192,6 +204,7 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
     if (!canRun(intent) && !(intent === "install-skill" && selection)) return;
     const selected = intent === "install-skill" ? selection : undefined;
     if (intent === "install-skill" && (!selected || selectedRevision !== pickerRevision)) return;
+    useFeedback(intent);
     busy = true; error.textContent = ""; const revision = ++actionRevision;
     activity.textContent = { connect: "Connecting…", rotate: "Rotating credentials…", disconnect: "Disconnecting…", repair: "Preparing connection repair…", "install-cli": "Preparing CLI installation…", "install-skill": "Preparing skill installation…" }[intent];
     render();
@@ -216,15 +229,18 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
         // Resuming an explicitly chosen unfinished skill is allowed only by Repair.
         if (intent !== "repair") { error.textContent = "This action unexpectedly includes a skill. Nothing was submitted."; return; }
       }
-      if (value.commandChange && (pendingCommandRepair || intent === "install-cli" && value.commandChange.disposition === "explicit-repair")) {
+      if (value.commandChange && pendingCommandRepair) {
         confirmPlan = value;
         const { installed, proposed } = value.commandChange;
         const explanation = !installed ? `Publish the required CLI version ${proposed.version}.` : installed.installation !== proposed.installation ? `Transfer management of the recognized CLI from another app profile to this one, replacing version ${installed.version} with version ${proposed.version}.` : installed.version !== proposed.version ? `Replace the recognized CLI version ${installed.version} with version ${proposed.version}.` : installed.sha256 !== proposed.sha256 ? `Replace the recognized CLI with a different build of version ${proposed.version}.` : `Finish the recognized CLI publication for version ${proposed.version}.`;
-        const consequence = pendingCommandRepair ? value.credentialChange ? "Resume the previously accepted credential changes and any selected outputs." : value.skillChange !== "not-requested" ? "Resume the previously accepted skill output; credentials are unchanged." : "Resume the previously accepted outputs; credentials are unchanged." : "Credentials and skills are unchanged.";
-        confirmation.replaceChildren(node("h3", pendingCommandRepair ? "Resume unfinished setup?" : "Update recognized CLI?"), node("p", `${explanation} ${consequence}`), action(pendingCommandRepair ? "Cancel repair" : "Cancel CLI update", () => { actionRevision++; clearConfirmation(); render(); }), action(pendingCommandRepair ? "Confirm repair" : "Confirm CLI update", () => {
+        const consequence = value.credentialChange ? "Resume the previously accepted credential changes and any selected outputs." : value.skillChange !== "not-requested" ? "Resume the previously accepted skill output; credentials are unchanged." : "Resume the previously accepted outputs; credentials are unchanged.";
+        const cancel = action("Cancel repair", () => { actionRevision++; clearConfirmation(); render(); });
+        const confirm = action("Confirm repair", () => {
           if (!confirmPlan || busy || observing || unsettled()) return;
           const exact = confirmPlan; busy = true; void applyPlan(exact, revision);
-        }));
+        });
+        cancel.className = confirm.className = "setup-button";
+        confirmation.replaceChildren(node("h3", "Resume unfinished setup?"), node("p", `${explanation} ${consequence}`), cancel, confirm);
         return;
       }
       await applyPlan(value, revision);
@@ -239,7 +255,7 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
   }
   async function choose() {
     if (!alive || blocked() || !canRun("install-skill")) return;
-    closePicker(); error.textContent = ""; picking = true; render();
+    useFeedback("install-skill"); closePicker(); error.textContent = ""; picking = true; render();
     const revision = pickerRevision;
     const installSelected = () => {
       if (!alive || revision !== pickerRevision || !picker || !selection) return;
@@ -267,6 +283,8 @@ export function setupView(root: HTMLElement, client: TypedPackageClient<PackageC
     } catch (cause) { if (alive && revision === pickerRevision) { closePicker(); render(); fail(cause); } }
   }
   function showStatus(value: SetupStatus) {
+    const owner = submission?.operationId === value.operationId && value.operationId ? submission.intent : unsettled() ? submission!.intent : value.intent;
+    const { progress, error } = feedback[partFor(owner)];
     const active = ["accepted", "prepared", "outputs", "committed"].includes(value.phase);
     const key = JSON.stringify(value);
     if (unsettled()) {

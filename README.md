@@ -122,9 +122,11 @@ uses injected private physical homes; installed production-home M1–M5 are pend
 
 Agent setup in both views separates **CLI**, **Workspace connection** and the
 optional **Agent skill**. Use **Install CLI** (or **Update CLI**) independently of
-credentials; there is no uninstall. A recognized exceptional CLI replacement asks
-for one short confirmation with human-readable versions. Modified or unrelated
-outputs cannot be replaced here. Command path is available in a disclosure.
+credentials; there is no uninstall. Clicking Install/Update CLI prepares and applies
+that exact recognized output change immediately, with no second confirmation.
+Modified or unrelated outputs cannot be replaced here. Command path is available
+in a disclosure. Setup progress, dismissible results and errors appear above the
+buttons in their own CLI, Workspace connection or Agent skill section.
 
 Use **Connect**, **Rotate credentials**, **Disconnect** or **Repair** as offered
 by current connection facts. These named actions internally prepare and accept

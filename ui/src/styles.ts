@@ -37,6 +37,7 @@ export const PACKAGE_STYLES = `
   .setup-button.primary { color: var(--teamarness-color-accent); border-color: var(--teamarness-color-accent); }
   .setup-part + .setup-part { border-top: 1px solid var(--teamarness-color-border); padding-top: 1rem; margin-top: 1rem; }
   .setup-part > p, .setup-part > small { display: block; margin-top: .45rem; }
+  .setup-part > p:empty { display: none; }
   .setup-part details { font-size: .85rem; }
   .status-toggle { display: inline-flex; align-items: center; gap: .6rem; }
   .status-toggle small { min-width: 3rem; text-align: right; font-size: .78rem; }

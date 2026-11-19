@@ -348,10 +348,12 @@ terminal/action observations, never a hash per progress event or filesystem poll
 Routine named actions internally preview then accept one exact plan; no visible
 Preview/checkbox/Apply ceremony or opaque provenance. Connect/Rotate/skill require
 an issue-free current CLI and an unchanged command plan; they never hide command
-publication or attach a folder to credential actions. Recognized exceptional CLI
-replacement has one short human-version/management confirmation; collisions
-remain refusal. Required command publication in a valid already accepted pending
-Repair uses the same targeted confirmation to avoid a recovery deadlock; only
+publication or attach a folder to credential actions. Install/Update CLI itself
+consents to the exact recognized output change; no second CLI confirmation is
+shown. Collisions remain refusal. Progress, errors and independently dismissible
+results belong above the controls in each CLI/connection/skill section. Required
+command publication in a valid already accepted pending Repair retains its
+targeted confirmation to avoid a recovery deadlock; only
 Repair can resume those reserved outputs, never the independent CLI action. Install skill… opens the native chooser and selection immediately
 prepares/applies only the skill, holding its lease through acceptance. Cancel and
 stale/unmounted observations never apply; accepted work still outlives the view.

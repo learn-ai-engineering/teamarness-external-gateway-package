@@ -388,8 +388,10 @@ a new durable CLI history form from this implementation.
 Both Package views expose these seams as direct named actions: **Install CLI** /
 **Update CLI**, **Connect**, **Rotate credentials**, **Disconnect**, **Repair**,
 and optional **Install skill…**. Routine actions internally preview then apply
-one exact plan. Only recognized exceptional CLI replacement pauses for a short
-version/management confirmation; unrecognized or modified outputs are refused.
+one exact plan. Clicking Install/Update CLI itself authorizes that recognized
+output change, including a same-version development rebuild; there is no second
+CLI confirmation. Unrecognized or modified outputs are refused. Progress, errors
+and dismissible results stay next to the controls in their own setup section.
 Connect, Rotate credentials and Install skill… refuse any CLI change or non-null
 CLI issue; first use the independent CLI action. A valid already accepted pending
 Repair is the narrow exception: it can resume required command publication with

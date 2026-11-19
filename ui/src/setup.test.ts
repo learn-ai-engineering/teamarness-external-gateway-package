@@ -28,13 +28,13 @@ describe("Direct managed setup", () => {
     for (const text of ["Preview", "Apply", "Approve", "opaque-plan", "opaque-operation", "opaque-owner", "b".repeat(64)]) expect(root.textContent).not.toContain(text);
     expect(root.all().some(e => e.type === "checkbox")).toBe(false); expect(root.textContent).toContain("Accepted"); expect(root.textContent).not.toContain("Connected"); view.stop();
   });
-  it("installs CLI independently and confirms only recognized explicit repair with human versions", async () => {
+  it("installs CLI independently and updates recognized builds with one click", async () => {
     const client = fake({ "external-gateway.setup.inspect": () => ({ ...facts, cli: { ...facts.cli, state: "missing", version: null, change: "install" } }) }); const first = start(client); await flush(); button(first.root, "Install CLI").click(); await flush();
     expect(calls(client, "preview")[0].payload).toEqual({ intent: "install-cli" }); expect(calls(client, "apply")).toHaveLength(1); first.view.stop();
     const repair = fake({ "external-gateway.setup.inspect": () => ({ ...connected, cli: { ...facts.cli, change: "explicit-repair" } }), "external-gateway.setup.preview": () => ({ ...plan, intent: "install-cli", credentialChange: false, commandChange: { disposition: "explicit-repair", installed: { ...version, version: "1.2.0" }, proposed: version } }) }); const { root, view } = start(repair); await flush();
-    button(root, "Update CLI").click(); await flush(); expect(calls(repair, "apply")).toHaveLength(0); expect(root.textContent).toContain("1.2.0"); expect(root.textContent).toContain("1.1.0"); expect(root.textContent).not.toContain("opaque-owner");
-    button(root, "Cancel CLI update").click(); expect(calls(repair, "apply")).toHaveLength(0);
-    button(root, "Update CLI").click(); await flush(); button(root, "Confirm CLI update").click(); await flush(); expect(calls(repair, "apply")).toHaveLength(1); view.stop();
+    button(root, "Update CLI").click(); await flush();
+    expect(calls(repair, "apply")).toEqual([{ operation: "external-gateway.setup.apply", payload: { planId: "opaque-plan" } }]);
+    expect(root.textContent).not.toContain("Confirm CLI update"); expect(root.textContent).not.toContain("Cancel CLI update"); expect(root.textContent).not.toContain("opaque-owner"); view.stop();
   });
   it.each(["connect", "rotate", "install-skill"] as const)("refuses hidden command publication for %s", async intent => {
     const client = fake({ "external-gateway.setup.inspect": () => intent === "rotate" ? connected : facts, "external-gateway.setup.preview": () => ({ ...plan, intent, credentialChange: intent !== "install-skill", commandChange: { ...plan.commandChange, disposition: "refresh" } }) }); const { root, view } = start(client); await flush();
@@ -96,13 +96,55 @@ describe("Skill chooser and owned action lifetime", () => {
   it("ignores late acceptance after completed result; remount observes without replay", async () => {
     const accepted = deferred<{ operationId: string }>(); const client = fake({ "external-gateway.setup.apply": () => accepted.promise }); const { root, view } = start(client); await flush(); button(root, "Connect").click(); await flush();
     await client.emit("external-gateway.setup.watch", complete); accepted.resolve({ operationId: "opaque-operation" }); await flush(); expect(root.textContent).not.toContain("Accepted"); expect(root.textContent).toContain("Connection completed");
-    const dismiss = button(root, "Dismiss setup notification"); await client.emit("external-gateway.setup.watch", complete); expect(button(root, "Dismiss setup notification")).toBe(dismiss); dismiss.click(); expect(field(root, "Setup notification").hidden).toBe(true);
-    await client.emit("external-gateway.setup.watch", { ...complete, phase: "repair-required", error: "external_gateway.output_collision" }); expect(field(root, "Setup notification").hidden).toBe(false); view.stop();
+    const dismiss = button(root, "Dismiss connection notification"); await client.emit("external-gateway.setup.watch", complete); expect(button(root, "Dismiss connection notification")).toBe(dismiss); dismiss.click(); expect(field(root, "Connection notification").hidden).toBe(true);
+    await client.emit("external-gateway.setup.watch", { ...complete, phase: "repair-required", error: "external_gateway.output_collision" }); expect(field(root, "Connection notification").hidden).toBe(false); view.stop();
     const remount = fake({ "external-gateway.setup.status": () => complete, "external-gateway.setup.inspect": () => connected }); const second = start(remount); await flush(); expect(calls(remount, "apply")).toHaveLength(0); expect(second.root.textContent).toContain("Workspace connection: Connected"); second.view.stop();
   });
   it("stale plan and collision failures are actionable and target-specific, not overwrite or folder advice for CLI", async () => {
     const client = fake({ "external-gateway.setup.apply": () => { throw createPackageRequestError({ packageError: { code: "external_gateway.setup_preview_stale" } }); } }); const { root, view } = start(client); await flush(); button(root, "Connect").click(); await flush(); expect(root.textContent).toContain("changed"); expect(root.textContent).not.toContain("setup_preview_stale"); expect(calls(client, "apply")).toHaveLength(1); view.stop();
     for (const output of ["command", "skill"]) { const broken = fake({ "external-gateway.setup.preview": () => { throw createPackageRequestError({ packageError: { code: "external_gateway.output_collision", details: { output } } }); } }); const next = start(broken); await flush(); button(next.root, "Connect").click(); await flush(); expect(next.root.textContent).toContain(output === "command" ? "CLI target" : "selected skill"); expect(next.root.textContent).not.toContain("output_collision"); expect(calls(broken, "apply")).toHaveLength(0); next.view.stop(); }
+  });
+});
+
+it.each([
+  { ...version, sha256: "a".repeat(64) },
+  { ...version, installation: "another-owner" },
+])("applies a recognized same-version CLI update directly: %s", async installed => {
+  const client = fake({ "external-gateway.setup.inspect": () => ({ ...connected, cli: { ...facts.cli, change: "explicit-repair" } }), "external-gateway.setup.preview": () => ({ ...plan, intent: "install-cli", credentialChange: false, commandChange: { disposition: "explicit-repair", installed, proposed: version } }) });
+  const { root, view } = start(client); await flush(); button(root, "Update CLI").click(); await flush();
+  expect(calls(client, "apply")).toEqual([{ operation: "external-gateway.setup.apply", payload: { planId: "opaque-plan" } }]);
+  expect(root.textContent).not.toContain("Confirm CLI update"); expect(root.textContent).not.toContain("Cancel CLI update"); expect(client.calls.some(c => c.operation.includes("token."))).toBe(false); view.stop();
+});
+
+describe("Section-local setup feedback", () => {
+  it.each(["install-cli", "connect", "rotate", "disconnect", "install-skill"] as const)("keeps %s progress and dismissible result above its own controls", async intent => {
+    const current = intent === "install-cli" ? { ...facts, cli: { ...facts.cli, change: "explicit-repair" as const } } : intent === "rotate" || intent === "disconnect" ? connected : facts;
+    const client = fake({ "external-gateway.setup.inspect": () => current }); const { root, view } = start(client); await flush();
+    if (intent === "install-skill") { button(root, "Install skill…").click(); await flush(); await client.emit("external-gateway.setup.choose-skill-folder", { outcome: "selected", selectionId: "chosen", path: "/chosen" }); }
+    else button(root, intent === "install-cli" ? "Update CLI" : intent === "rotate" ? "Rotate credentials" : intent === "disconnect" ? "Disconnect" : "Connect").click();
+    await flush();
+    const partName = intent === "install-cli" ? "CLI setup" : intent === "install-skill" ? "Agent skill setup" : "Workspace connection setup";
+    const noticeName = intent === "install-cli" ? "CLI notification" : intent === "install-skill" ? "Skill notification" : "Connection notification";
+    const part = () => field(root, partName);
+    expect(field(root, noticeName).parent).toBe(part()); expect(field(root, noticeName).textContent).toContain("Accepted");
+    const result: SetupStatus = { ...complete, intent, skill: intent === "install-skill" ? "installed" : "not-requested", access: intent === "disconnect" ? "revoked" : intent === "install-cli" || intent === "install-skill" ? "unchanged" : "configured" };
+    await client.emit("external-gateway.setup.watch", result); await flush();
+    const notice = field(root, noticeName); expect(notice.parent).toBe(part()); expect(notice.textContent).toContain("completed");
+    const actionButton = part().all().find(e => e.tagName === "button" && !e.attributes.get("aria-label")?.startsWith("Dismiss"))!;
+    expect(part().all().indexOf(notice)).toBeLessThan(part().all().indexOf(actionButton));
+    button(root, `Dismiss ${noticeName.toLowerCase()}`).click(); await client.emit("external-gateway.setup.watch", result); await flush(); expect(field(root, noticeName).hidden).toBe(true); view.stop();
+  });
+  it("keeps CLI success in its section after the update button disappears and another action completes", async () => {
+    let current: SetupInspection = { ...connected, cli: { ...facts.cli, change: "explicit-repair" } };
+    const client = fake({ "external-gateway.setup.inspect": () => current }); const { root, view } = start(client); await flush(); button(root, "Update CLI").click(); await flush(); current = connected;
+    await client.emit("external-gateway.setup.watch", { ...complete, intent: "install-cli", access: "unchanged" }); await flush();
+    expect(field(root, "CLI setup").textContent).toContain("CLI installation completed"); expect(root.all().some(e => e.textContent === "Update CLI")).toBe(false);
+    button(root, "Rotate credentials").click(); await flush(); await client.emit("external-gateway.setup.watch", { ...complete, intent: "rotate" }); await flush();
+    expect(field(root, "CLI setup").textContent).toContain("CLI installation completed"); expect(field(root, "Workspace connection setup").textContent).toContain("Credential rotation completed"); view.stop();
+  });
+  it("keeps action errors in their originating section", async () => {
+    const client = fake({ "external-gateway.setup.inspect": () => ({ ...facts, cli: { ...facts.cli, change: "explicit-repair" } }), "external-gateway.setup.preview": () => { throw createPackageRequestError({ packageError: { code: "external_gateway.output_collision", details: { output: "command" } } }); } });
+    const { root, view } = start(client); await flush(); button(root, "Update CLI").click(); await flush(); expect(field(root, "CLI setup").textContent).toContain("CLI target"); expect(field(root, "Agent skill setup").textContent).not.toContain("CLI target"); view.stop();
   });
 });
 
@@ -143,10 +185,13 @@ it("rechecks non-null CLI issues before credential acceptance, without hiding th
   expect(calls(client, "preview")).toHaveLength(0); expect(calls(client, "apply")).toHaveLength(0); expect(root.textContent).toContain("Reload"); expect(root.textContent).toContain("Workspace connection: Connected"); view.stop();
 });
 
-it("discards exceptional CLI confirmation on changed facts and surfaces stale confirmed apply without retry", async () => {
-  const client = fake({ "external-gateway.setup.inspect": () => ({ ...facts, cli: { ...facts.cli, change: "explicit-repair" } }), "external-gateway.setup.preview": () => ({ ...plan, intent: "install-cli", credentialChange: false, commandChange: { ...plan.commandChange, disposition: "explicit-repair" } }), "external-gateway.setup.apply": () => { throw createPackageRequestError({ packageError: { code: "external_gateway.setup_preview_stale" } }); } });
-  const { root, view } = start(client); await flush(); button(root, "Update CLI").click(); await flush(); view.update({ ...policy, port: 32123 }); await flush(); expect(root.textContent).not.toContain("Confirm CLI update"); expect(calls(client, "apply")).toHaveLength(0);
-  button(root, "Update CLI").click(); await flush(); button(root, "Confirm CLI update").click(); await flush(); expect(calls(client, "apply")).toHaveLength(1); expect(root.textContent).toContain("changed"); expect(root.textContent).not.toContain("Confirm CLI update"); view.stop();
+it("discards overtaken CLI preparation and surfaces stale direct apply without retry", async () => {
+  const preview = deferred<typeof plan>();
+  const client = fake({ "external-gateway.setup.inspect": () => ({ ...facts, cli: { ...facts.cli, change: "explicit-repair" } }), "external-gateway.setup.preview": () => preview.promise, "external-gateway.setup.apply": () => { throw createPackageRequestError({ packageError: { code: "external_gateway.setup_preview_stale" } }); } });
+  const { root, view } = start(client); await flush(); button(root, "Update CLI").click(); await flush(); view.update({ ...policy, port: 32123 }); await flush();
+  preview.resolve({ ...plan, intent: "install-cli", credentialChange: false, commandChange: { ...plan.commandChange, disposition: "explicit-repair" } }); await flush();
+  expect(calls(client, "apply")).toHaveLength(0); expect(root.textContent).toContain("changed");
+  button(root, "Update CLI").click(); await flush(); expect(calls(client, "apply")).toHaveLength(1); expect(root.textContent).toContain("changed"); expect(root.textContent).not.toContain("Confirm CLI update"); view.stop();
 });
 
 it("repairs cleanup without CLI publication and disconnects directly without a selected folder", async () => {
