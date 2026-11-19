@@ -168,6 +168,10 @@ async fn already_authorized_read_finishes_once_after_revoke() {
     let token = bearer.clone();
     let read = tokio::spawn(async move { post(port, &token, call(json!({}))).await });
     barrier.entered.notified().await;
+    // The Provider observes "invoke" during the admission's first poll, which still holds
+    // the Policy owner until the call is enqueued. `change` deliberately never queues (it
+    // refuses with retryable `busy`), so first await the owner through the FIFO lock.
+    policy.authenticate(&bearer).await.unwrap();
     policy.change(Change::Revoke(id)).await.unwrap();
     drop(release);
     assert_eq!(read.await.unwrap(), (200, json!({"result":{"value":42}})));
