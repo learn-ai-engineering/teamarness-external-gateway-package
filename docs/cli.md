@@ -140,7 +140,7 @@ there is no daemon, model wakeup, durable replay or universal session cleanup.
 Explicitly reconnect and reconcile with current Provider guidance after a gap.
 
 Subscriptions require stdout to be a pollable pipe or terminal. Direct redirection
-such as `> events.ndjson` is unsupported: macOS regular-file writes cannot honor
+such as `> events.ndjson` is unsupported: regular-file writes cannot honor
 O_NONBLOCK and the mandatory pending-write bound. This refuses **before network**
 with exit 2, `cli.stream_stdout_unsupported` JSON and a hint on stderr; unsupported
 stdout itself is never written. Ordinary command output is unchanged. To save a
@@ -368,9 +368,15 @@ shell-quoted command. Run it from the installed managed copy, so that the skill
 names that copy:
 
 ```sh
-mkdir -p '<agent skill folder>/teamarness'
-~/.local/bin/tmx --skill > '<agent skill folder>/teamarness/SKILL.md'
+(
+  umask 077
+  mkdir -p '<agent skill folder>/teamarness'
+  ~/.local/bin/tmx --skill > '<agent skill folder>/teamarness/SKILL.md'
+)
 ```
+
+The subshell's `umask 077` keeps new folders and the file owner-only without
+changing the calling shell's umask; existing folders and files keep their modes.
 
 If you run it from another copy, such as a Package Directory's Backend
 executable, the skill names that copy instead. A manually written file has no

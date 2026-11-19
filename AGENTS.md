@@ -244,7 +244,7 @@ Corrected full-access Phase 2 refreshes the four canonical vendor trees once fro
 
 `streams.rs` owns eight pending/active subscriptions separately from twelve calls. Confirmed SDK methods precede HTTP 200/ready. Legacy/unconfirmed setup refuses clearly, never fabricates ready. Policy owns token-generation/exact-tool registration and every output admission. Idle permission/lifecycle loss signals streams before drain; failed storage closes all. Pending observer loss retains capacity through SDK terminal and late success closes. Use recv_with_credit with one waiting frame plus one writer-owned frame, 256 KiB original values plus 4 KiB framing, five-second pending-write flush and 15-second heartbeat. No owner is held over socket/credit/cleanup waits; no detached handles, durable replay, automatic reconnect or model wakeup. Already-admitted bounded bytes may drain. Provider Markdown stays unchanged; structured runtime.guide remains callable. Native Epic/Collection prerequisites and Provider versions/conflicts stay Provider-owned. Final real-Host qualification and Don-owned corrected-plan M1–M4 remain pending.
 
-`cli/` owns interaction major 1, raw-byte JSON/NDJSON and numeric-loopback Hyper client access. `cli/stream.rs` serializes one observation, validated ready and terminal selection; descriptor-level nonblocking stdout has one bounded pending line, a five-second write budget and no detached writer. Subscriptions require readiness-registered pipe/terminal stdout; regular/non-pollable output refuses before network (exit 2, stderr JSON/hint), never silently falling back to blocking disk I/O. Continuous mode has no CLI lifetime cap; the 45-second valid-frame liveness clock pauses under local output backpressure. `client_store.rs` owns private format-1 connection files, origin conflicts and cross-process publication. Production home lookup uses bounded fixed macOS dscacheutil, never HOME or a public path flag; tests inject physical homes through constructors or the unassembled fixture example. CLI help/version do not resolve home, start Host stdio, listener or AppKit. `setup.rs` owns recoverable managed access coordination; Policy alone owns authorization. `backend/build.rs` embeds the Package manifest version; Cargo crate version, CLI major and store format are independent.
+`cli/` owns interaction major 1, raw-byte JSON/NDJSON and numeric-loopback Hyper client access. `cli/stream.rs` serializes one observation, validated ready and terminal selection; descriptor-level nonblocking stdout has one bounded pending line, a five-second write budget and no detached writer. Subscriptions require readiness-registered pipe/terminal stdout; regular/non-pollable output refuses before network (exit 2, stderr JSON/hint), never silently falling back to blocking disk I/O. Continuous mode has no CLI lifetime cap; the 45-second valid-frame liveness clock pauses under local output backpressure. `client_store.rs` owns private format-1 connection files, origin conflicts and cross-process publication. Production home lookup is a bounded (2 s) fixed OS account query: macOS `/usr/bin/dscacheutil`, Linux `/usr/bin/getent passwd <euid>` with an empty environment. Neither reads HOME or accepts a public path flag; any failure is `cli.home_unavailable` with no fallback (the Backend maps it to `external_gateway.home_unavailable`, which fails activation). Tests inject physical homes through constructors or the unassembled fixture example. CLI help/version/licenses/skill do not resolve home, start Host stdio, listener or AppKit. `setup.rs` owns recoverable managed access coordination; Policy alone owns authorization. `backend/build.rs` embeds the Package manifest version; Cargo crate version, CLI major and store format are independent.
 
 
 `managed_install.rs` owns recognized executable/skill publication safety shared by
@@ -297,16 +297,20 @@ mount-scoped leases. Its empty-input setup subscription establishes promptly;
 there is no browsing lifetime limit. The one selected event ends native work,
 not the selection lease: close/reselect/unmount/lifecycle invalidates selections
 and unaccepted plans, while accepted apply remains independently owned. Child
-kill/reap and lifecycle joins are explicit. `picker_helper.rs` dispatches before
-Tokio, initializes AppKit and runs synchronous RFD on the OS main thread; its
-fixed private request pipe is also the parent-EOF lifeline. Keep 4-KiB path,
+kill/reap and lifecycle joins are explicit. On macOS `picker_helper.rs` dispatches
+before Tokio, initializes AppKit and runs synchronous RFD on the OS main thread; its
+fixed private request pipe is also the parent-EOF lifeline. Other targets have no
+native chooser: `Picker::choose` refuses `choose-skill-folder` before capacity or
+spawn with non-retryable `external_gateway.picker_unavailable`, and the helper
+emits `picker_failed`. Keep 4-KiB path,
 8-KiB frame/stderr and five-second terminal/cleanup budgets, no debug leakage or
 arbitrary helper/script arguments. `picker-fixture` is unassembled fault/lifeline
 evidence, never a claim of actual AppKit or installed behavior. Package version
 1.1.0 is manifest-owned; CLI/store major 1, process 1.1, capabilities and artifact
 shape remain independent. Native focus/installed M1–M5 remain Don-owned pending.
 `cli::THIRD_PARTY_NOTICES_JSON` embeds literal dependency notices and source provenance;
-`tmx --licenses` retrieves them offline before runtime/home/network/AppKit. Preserve
+`tmx --licenses` retrieves them offline before runtime/home/network/AppKit, as
+`tmx --skill` prints the portable skill for manual installation. Preserve
 upstream text/checksums when changing native dependencies; assembled checks compare
 the entire resource in both CLI entry modes, without adding an asset category.
 

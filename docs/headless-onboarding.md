@@ -19,6 +19,13 @@ a real Host. The real-Host run of this guide is pending.
   command, see [Host command wrapper (planned, unverified)](#host-command-wrapper-planned-unverified).
 - The Provider Package whose tools you want to expose is enabled in the same
   Workspace.
+- The Backend's effective UID resolves to an absolute home directory through
+  the OS account database within two seconds. On Linux the Backend runs
+  `/usr/bin/getent passwd <uid>` with an empty environment and never reads
+  `HOME`. If that lookup fails (no `getent`, no passwd entry, or a slow name
+  service), the Backend does not activate; the activation error is
+  `external_gateway.home_unavailable`. Check the lookup with
+  `getent passwd "$(id -u)"` as the Backend's OS user.
 
 Send each mutation once. Do not retry a mutation automatically. If the outcome
 is unknown, inspect the current state before you decide what to do next.
@@ -87,6 +94,14 @@ Enabling a package selects no tools. List its tools with
 
 ```json
 {"contract":"dev.test.reads"}
+```
+
+A page holds at most 32 tools. If `nextOffset` is not `null`, request the next
+page with the same contract and that offset, and continue until `nextOffset` is
+`null`:
+
+```json
+{"contract":"dev.test.reads","offset":<nextOffset>}
 ```
 
 Every tool has `selected` `false` at this point. Select each tool separately
@@ -197,11 +212,16 @@ On a headless node there is no folder chooser. Print the portable skill from
 the installed command and write it to the external agent's skill folder:
 
 ```sh
-mkdir -p '<agent skill folder>/teamarness'
-~/.local/bin/tmx --skill > '<agent skill folder>/teamarness/SKILL.md'
+(
+  umask 077
+  mkdir -p '<agent skill folder>/teamarness'
+  ~/.local/bin/tmx --skill > '<agent skill folder>/teamarness/SKILL.md'
+)
 ```
 
-The skill contains no credential. Rerun the command after a CLI update. See
+The subshell's `umask 077` makes new folders and the new file owner-only,
+without changing your shell's umask. Existing folders and files keep their
+modes. The skill contains no credential. Rerun the command after a CLI update. See
 [Manual skill installation with `tmx --skill`](cli.md#manual-skill-installation-with-tmx---skill).
 
 ## Common errors
@@ -213,15 +233,20 @@ The skill contains no credential. Rerun the command after a CLI update. See
 | `external_gateway.credential_consent_required` | `repair` has nothing it can repair without a new credential. | Use `connect` or `rotate`. |
 | `external_gateway.not_found` | `disconnect` when this Workspace was never connected. | No action is needed. |
 | `external_gateway.setup_preview_stale` | The plan expired, or the state changed after the preview. | Preview again, then apply the new plan. |
-| `external_gateway.busy` | Other setup work is in progress, or four previews are open. | Poll `setup.status` until it finishes, then try again. |
+| `external_gateway.busy` | Other setup work is in progress. | Poll `setup.status` until `phase` is not `accepted`, `prepared`, `outputs` or `committed`, then try again. |
+| `external_gateway.busy` | Four previews are open. Polling does not close them. | Apply one of them, which discards the other open previews, or wait for them to expire ten minutes after each was created. |
 | `external_gateway.setup_repair_required` | An unfinished operation blocks new work. | Use `repair`. |
 | `external_gateway.connection_origin_conflict` | Another Installation or profile owns this Workspace's local connection. | Disconnect from the original profile. See [CLI usage and client custody](cli.md#credential-custody). |
 | `external_gateway.output_collision` | A file at the command path is not a recognized install. | Inspect and remove or move the file yourself, then preview again. |
 | `external_gateway.output_consent_required` | The command needs an explicit update. | Preview and apply `install-cli`. |
+| `external_gateway.output_unsafe` | A directory on the output path, for example `~/.local`, `~/.local/bin`, `~/.local/share`, `~/.local/share/teamarness` or the home directory or one of its ancestors, is group- or world-writable, or is owned by another user (only the home's ancestors may be owned by `root`). A group-writable directory is common when it was created under Ubuntu's default `0002` umask. `setup.inspect` reports this code in `cli.issue`, with `cli.state` `blocked` unless only `~/.local/bin` is affected; `setup.preview` fails with it. | Run `chmod go-w <dir>` on each such directory that you own, then inspect and preview again. |
+| `external_gateway.client_store_invalid` | The private client store under `~/.local/share/teamarness/external-gateway/` is unsafe or unreadable, for example because `~/.local` or `~/.local/share` is group- or world-writable. `setup.inspect` reports it as `connection.issue`. | Fix the directory modes as for `output_unsafe`, then inspect again. |
+| `external_gateway.home_unavailable` | The Backend could not resolve its OS user's home. The Backend does not activate. | See [Prerequisites](#prerequisites). |
 | `external_gateway.reload_required` | The Backend's admitted bytes changed. | Reload the Package, then preview again. |
 | `external_gateway.forbidden` | `tmx call` to a tool that is not selected. | Select the tool with `tool.set`. |
 | `external_gateway.unauthorized` | The credential was revoked or rotated elsewhere. | Inspect, then use `rotate` or `connect`. |
 | `cli.workspace_not_configured` | No local connection exists for that Workspace. | Connect the Workspace. |
+| `cli.home_unavailable` | `tmx` could not resolve the current OS user's home through the OS account database (`getent passwd <effective-uid>` on Linux). `tmx` never reads `HOME`. | Make the account resolvable, then run the command again. |
 | `cli.workspace_required` | `tmx` was run without `--workspace`. | Add `--workspace <workspace-id>`. |
 | `cli.command_outcome_unknown` | A call was sent, but no complete response arrived. | Do not retry. Check the result through the Provider. |
 

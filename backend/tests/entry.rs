@@ -346,7 +346,28 @@ fn copied_fixture_tmx_uses_only_explicit_child_home_and_shared_cli_logic() {
         )
         .unwrap();
     installer.apply(&plan, Approval::Explicit).unwrap();
-    let copy = home.join(".local/bin/tmx");
+    let installed = home.join(".local/bin/tmx");
+    assert_eq!(
+        std::fs::read(&installed).unwrap(),
+        std::fs::read(&source).unwrap()
+    );
+    // This process wrote `installed` (and `source`), so it runs neither. On Linux a parallel
+    // test's spawning child can inherit a write descriptor between fork and exec, and running
+    // that file then fails with ETXTBSY. Every executable run below is made by a separate
+    // `/bin/cp` process instead, so this process never holds a write descriptor to it.
+    let cp = |from: &std::path::Path, to: &std::path::Path| {
+        let status = std::process::Command::new("/bin/cp")
+            .arg("--")
+            .args([from, to])
+            .env_clear()
+            .status()
+            .unwrap();
+        assert!(status.success());
+    };
+    let runnable = root.join("runnable");
+    std::fs::create_dir(&runnable).unwrap();
+    let copy = runnable.join("tmx");
+    cp(&installed, &copy);
     assert_eq!(
         std::fs::read(&copy).unwrap(),
         std::fs::read(&source).unwrap()
@@ -381,15 +402,7 @@ fn copied_fixture_tmx_uses_only_explicit_child_home_and_shared_cli_logic() {
     // The skill names the canonical invoked copy, never the managed home path it was copied from.
     let moved = root.join("agent's fixture dir");
     std::fs::create_dir(&moved).unwrap();
-    // A separate `cp` process: this test process never holds a write descriptor to an
-    // executable it runs, which a parallel test's spawning child could inherit (ETXTBSY).
-    let status = std::process::Command::new("/bin/cp")
-        .arg("--")
-        .args([&copy, &moved.join("tmx")])
-        .env_clear()
-        .status()
-        .unwrap();
-    assert!(status.success());
+    cp(&installed, &moved.join("tmx"));
     let expected = include_str!("../resources/teamarness/SKILL.md").replace(
         "{{COMMAND}}",
         &format!(

@@ -70,8 +70,8 @@ Installed users retrieve the complete resource via offline `tmx --licenses`;
 final assembly compares those bytes in explicit and basename CLI modes. Thus
 source-free delivery retains notices without adding another artifact category;
 vendored Teamarness notices are unchanged. No license or digest check is waived.
-Final `otool -L` inspection records system framework dependencies separately from
-native/manual acquired-artifact execution qualification.
+Final `otool -L` (macOS) or `ldd` (Linux) inspection records system library
+dependencies separately from native/manual acquired-artifact execution qualification.
 
 The resource is a JSON-escaped UTF-8 string so literal upstream CRLF/trailing
 spaces are retained without whitespace-check exceptions. The 297,656 decoded
