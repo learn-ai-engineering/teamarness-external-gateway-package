@@ -33,7 +33,7 @@ Package UI
 
 `ui-contract.json` defines the requests that may cross this path. Treat it as the shared boundary between the UI and Backend. Change the contract before implementing a new request on either side.
 
-This Package consumes only `teamarness.workspace-context` 1.0, `teamarness.package-ports` 3.0 and `teamarness.membership` 1.0. It has eager activation, main and settings views, closed typed configuration requests and `external-gateway.status.watch`. It provides no Ports and declares no known consumed Ports. It targets `aarch64-apple-darwin`. The Backend requires process 1.1 and serves bounded authenticated IPv4 HTTP and confirmed NDJSON; the UI provides main/settings views, bounded catalog controls, one-time tokens and secret-free onboarding.
+This Package consumes only `teamarness.workspace-context` 1.0, `teamarness.package-ports` 3.0 and `teamarness.membership` 1.0. It has eager activation, main and settings views, closed typed configuration requests and `external-gateway.status.watch`. It provides no Ports and declares no known consumed Ports. It supports the targets `aarch64-apple-darwin` and `x86_64-unknown-linux-gnu`. The source manifest declares a placeholder Backend for each, and a native-only build assembles a Package Directory that declares only the target it built (`scripts/targets.mjs`). The Backend requires process 1.1 and serves bounded authenticated IPv4 HTTP and confirmed NDJSON; the UI provides main/settings views, bounded catalog controls, one-time tokens and secret-free onboarding.
 
 ## Project map
 
@@ -48,8 +48,10 @@ This Package consumes only `teamarness.workspace-context` 1.0, `teamarness.packa
 | `ui/src/styles.ts` | Holds this Package's CSS, adopted into the mount and removed on unmount. |
 | `ui/src/contract.generated.ts` | Generated request and response types. Regenerate it; never edit it. |
 | `ui/src/index.test.ts` | Exercises UI behavior with the UI SDK's fake Package client. |
-| `scripts/assemble-package.mjs` | Assembles final Backend, UI, contract, and manifest bytes into `dist/`. |
-| `scripts/validate-dist.mjs` | Applies Package Admission's rules to `dist/` and smoke-launches the Backend. |
+| `scripts/build-package.mjs` | Runs `npm run build`: selects the native target, then builds, assembles and validates it. |
+| `scripts/targets.mjs` | Lists the supported Backend targets, parses the shared `--target <triple>` argument, reads the native target from `rustc -vV` (or `$RUSTC`), and refuses a non-native or unsupported target. |
+| `scripts/assemble-package.mjs` | Assembles final Backend, UI, contract, and manifest bytes for one native target into `dist/`. Imported by `build-package.mjs` and its tests; it has no command line of its own. |
+| `scripts/validate-dist.mjs` | Applies Package Admission's rules to `dist/` for the native target, smoke-launches the Backend, then smoke-tests its picker and CLI entry modes. |
 | `scripts/verify-vendor.mjs` | Fails when a vendored SDK file no longer matches recorded provenance. |
 | `vendor/teamarness/` | Contains the generated copies of the Package Process Protocol and SDK source used by this project. |
 | `teamarness-authoring.json` | Records template, protocol, UI host, SDK provenance, and request namespace information. |
@@ -148,12 +150,13 @@ Package source, trust, Workspace enablement, synchronization, sharing, networkin
 
 Do not edit `dist/` after assembly. Any byte change makes the manifest declaration stale.
 
-The assembler copies one Backend executable, `ui/dist/index.js`, and `ui-contract.json`. The manifest declares no assets. Keep the UI inside the single ESM bundle unless the product needs a different artifact shape.
+The assembler copies one Backend executable, for the native target, `ui/dist/index.js`, and `ui-contract.json`. The manifest declares no assets. Keep the UI inside the single ESM bundle unless the product needs a different artifact shape.
 
 If you add UI assets, another Backend, or another target platform, update all of the following together:
 
 - `teamarness.package.json`;
 - `scripts/assemble-package.mjs`;
+- `scripts/targets.mjs` (`supportedTargets`), for another target platform;
 - build dependencies and commands; and
 - tests that verify final paths, permissions, sizes, and digests.
 

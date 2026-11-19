@@ -10,7 +10,14 @@ Native ordinary/streaming CLI access is also embedded in the same executable; se
 
 ## Build and check
 
-Use Rust 1.99.1 and Node 24.20.0 from this standalone project:
+Use Rust 1.99.1 and Node 24.20.0 from this standalone project. The source manifest declares one placeholder Backend for each supported target:
+
+| Machine | Rust target |
+|---|---|
+| macOS on Apple Silicon | `aarch64-apple-darwin` |
+| Linux on x86_64 with glibc | `x86_64-unknown-linux-gnu` |
+
+On Linux, install Rust through rustup so that `rust-toolchain.toml` selects 1.99.1, install Node 24.20.0, and install a C toolchain that provides the system linker (`build-essential` on Ubuntu).
 
 ```sh
 npm ci
@@ -22,6 +29,8 @@ npm test
 npm run build
 git diff --check
 ```
+
+The build is native only. It builds for the target that `rustc -vV` (or `$RUSTC -vV`) reports as its host, and the assembled Package Directory declares only that target's Backend. `npm run build -- --target <triple>` confirms the target: it refuses any other target, or any other argument, with exit status 2 before it runs Cargo or changes `dist/`. Cargo always builds with that explicit `--target`, and the assembler takes the Backend from `<triple>/release/` inside Cargo's target directory (`target/` unless `CARGO_TARGET_DIR` or `build.target-dir` says otherwise), so a Cargo `build.target` setting cannot leave a stale binary in its place. Cross-compilation is not supported, so build each target on its own machine.
 
 The build performs locked release compilation, UI assembly, final manifest/digest validation and a Backend smoke handshake. `npm test` includes vendor integrity, exact direct pins, contract/generated-type checks, locked workspace Rust tests, UI tests and assembler tests. A smoke handshake is not an HTTP or real-Host proof.
 

@@ -17,6 +17,12 @@
       "path": "backend/teamarness-generated-package-backend-aarch64-apple-darwin",
       "size": 0,
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "path": "backend/teamarness-generated-package-backend-x86_64-unknown-linux-gnu",
+      "size": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }
   ],
   "ui": {
