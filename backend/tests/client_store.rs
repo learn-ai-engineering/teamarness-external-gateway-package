@@ -1,6 +1,7 @@
 use teamarness_generated_package_backend::client_store::{ClientStore, Connection};
 #[test]
 fn durable_connection_and_local_summary_never_disclose_credentials() {
+    let _spawns = no_concurrent_spawn();
     let home = private_home();
     let store = ClientStore::for_home(&home.path().canonicalize().unwrap()).unwrap();
     let c = connection("workspace-a", "Acme");
@@ -42,6 +43,7 @@ fn record(home: &std::path::Path, id: &str) -> std::path::PathBuf {
 }
 #[test]
 fn filename_identity_duplicate_origin_and_future_invalid_state_are_preserved() {
+    let _spawns = no_concurrent_spawn();
     for kind in ["filename", "origin", "future", "malformed", "duplicate-key"] {
         let home = private_home();
         let path = home.path().canonicalize().unwrap();
@@ -87,6 +89,7 @@ fn filename_identity_duplicate_origin_and_future_invalid_state_are_preserved() {
 }
 #[test]
 fn record_and_count_boundaries_are_exact() {
+    let _spawns = no_concurrent_spawn();
     let home = private_home();
     let path = home.path().canonicalize().unwrap();
     let store = ClientStore::for_home(&path).unwrap();
@@ -128,6 +131,7 @@ fn record_and_count_boundaries_are_exact() {
 }
 #[test]
 fn symlink_hardlink_modes_ownership_and_unsafe_traversal_fail_closed() {
+    let _spawns = no_concurrent_spawn();
     for kind in [
         "symlink",
         "hardlink",
@@ -182,6 +186,7 @@ fn symlink_hardlink_modes_ownership_and_unsafe_traversal_fail_closed() {
 }
 #[test]
 fn existing_intermediate_modes_and_unrelated_files_are_unchanged() {
+    let _spawns = no_concurrent_spawn();
     let home = private_home();
     let path = home.path().canonicalize().unwrap();
     fs::create_dir(path.join(".local")).unwrap();
@@ -226,6 +231,7 @@ impl StorageFault for Fail {
 }
 #[test]
 fn durability_faults_never_acknowledge_or_change_unrelated_records() {
+    let _spawns = no_concurrent_spawn();
     for stage in [
         WriteStage::Write,
         WriteStage::FileSync,
@@ -257,6 +263,7 @@ fn durability_faults_never_acknowledge_or_change_unrelated_records() {
 }
 #[test]
 fn concurrent_name_publication_cannot_resurrect_rotated_credentials() {
+    let _spawns = no_concurrent_spawn();
     let home = private_home();
     let path = home.path().canonicalize().unwrap();
     let store = ClientStore::for_home(&path).unwrap();
@@ -310,12 +317,15 @@ fn lock_contention_and_process_death_release_the_os_lock() {
     let store = ClientStore::for_home(&path).unwrap();
     let c = connection("workspace-a", "Acme");
     store.publish(&c).unwrap();
+    // `spawn` returns only after the child has exec'd, closing every inherited descriptor.
+    let spawning = SPAWN.write().unwrap_or_else(|e| e.into_inner());
     let mut child = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "lock_child", "--nocapture"])
         .env("STORE_LOCK_FIXTURE_ROOT", root(&path))
         .stdout(std::process::Stdio::piped())
         .spawn()
         .unwrap();
+    drop(spawning);
     let mut reader = BufReader::new(child.stdout.take().unwrap());
     let mut line = String::new();
     loop {
@@ -332,6 +342,7 @@ fn lock_contention_and_process_death_release_the_os_lock() {
 }
 #[test]
 fn abandoned_temporary_bytes_are_never_promoted_or_reclaimed_by_reads() {
+    let _spawns = no_concurrent_spawn();
     let home = private_home();
     let path = home.path().canonicalize().unwrap();
     let store = ClientStore::for_home(&path).unwrap();
@@ -356,4 +367,12 @@ fn private_home() -> tempfile::TempDir {
         .permissions(fs::Permissions::from_mode(0o700))
         .tempdir()
         .unwrap()
+}
+/// On Linux a child being spawned copies this process's descriptor table and holds it
+/// until it execs, so a store lock just released by another test thread can still be
+/// held and the next nonblocking lock refuses. Store tests hold a read guard; the one
+/// spawning test holds the write guard across `spawn`, which returns after exec.
+static SPAWN: std::sync::RwLock<()> = std::sync::RwLock::new(());
+fn no_concurrent_spawn() -> std::sync::RwLockReadGuard<'static, ()> {
+    SPAWN.read().unwrap_or_else(|e| e.into_inner())
 }
