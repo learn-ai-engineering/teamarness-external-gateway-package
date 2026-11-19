@@ -1,5 +1,16 @@
 # Package-owned folder selection
 
+The native folder chooser exists only on macOS (`aarch64-apple-darwin`). Its RFD,
+objc2 and objc2-app-kit dependencies are macOS-only Cargo target dependencies, so
+the Linux Backend compiles none of them. On Linux (and any other non-macOS target),
+`external-gateway.setup.choose-skill-folder` refuses immediately with the
+non-retryable `external_gateway.picker_unavailable`, before it takes picker
+capacity, hashes the admitted executable or spawns a helper. Setup that installs
+no skill, including the CLI and connection actions, is unaffected. On Linux the
+private `--tmx-picker` entry still validates the exact request and lifeline as
+below, then emits the closed `picker_failed` error terminal; the private helper
+protocol and its error set are unchanged.
+
 The single admitted native executable has three entries: no arguments starts the
 Backend, basename `tmx` or `--tmx-cli` starts the offline-first CLI, and exactly
 `--tmx-picker` enters the private helper **before any Tokio Backend runtime**.
@@ -31,7 +42,7 @@ EOF have a five-second budget. The parent closes the lifeline, kills and reaps o
 cancel/failure; lifecycle stop cancels and joins every owned job. No credentials,
 arbitrary scripts, helper paths or dialog configuration cross the private pipe.
 
-The helper explicitly calls `NSApplication.sharedApplication(...).finishLaunching()`
+On macOS the helper explicitly calls `NSApplication.sharedApplication(...).finishLaunching()`
 on the OS main thread, then synchronous RFD `pick_folder`. Only the lifeline
 reader is a thread; no Backend Tokio runtime or Host connection is constructed.
 The modal native work ends with that process. This follows the accepted initialized
@@ -67,7 +78,10 @@ Manual token revoke remains available; managed rotation goes through setup.
 
 `picker-fixture` is an unassembled fault/lifeline executable with private physical
 roots, not a native dialog. Protocol/child/32-second health-and-real-call tests
-qualify parent ownership and bounded pipes; final artifact malformed-request
+qualify parent ownership and bounded pipes; they subscribe through the production
+chooser path, so they run only on macOS. On other targets a refusal test proves
+`picker_unavailable` precedes hashing and spawn, and the parent-only SIGKILL
+lifeline test still runs; final artifact malformed-request
 smoke qualifies dispatch without opening a panel. No automated test resolves or
 installs into the ordinary home. Don still owns acquired-artifact/native focus,
 Cancel/selection, installed setup and external-agent M1–M5. Prototype acceptance

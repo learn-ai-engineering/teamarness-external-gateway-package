@@ -1,6 +1,10 @@
-//! Fixed private helper entry. AppKit and synchronous RFD execute on the OS main thread.
+//! Fixed private helper entry. On macOS, AppKit and synchronous RFD execute on the OS
+//! main thread. On other targets the same private request and lifeline are validated,
+//! then the closed `picker_failed` terminal is emitted; no GUI dependency is compiled.
 //! No Backend runtime, home lookup, Host stdio, credentials or setup writes.
-use crate::picker::{FRAME_BYTES, REQUEST, valid_path};
+#[cfg(target_os = "macos")]
+use crate::picker::valid_path;
+use crate::picker::{FRAME_BYTES, REQUEST};
 use serde_json::json;
 use std::io::{Read, Write};
 fn emit(value: serde_json::Value) -> u8 {
@@ -37,6 +41,14 @@ pub fn entry() -> u8 {
     if establish_lifeline().is_err() {
         return fail("picker_request_invalid");
     }
+    choose()
+}
+#[cfg(not(target_os = "macos"))]
+fn choose() -> u8 {
+    fail("picker_failed")
+}
+#[cfg(target_os = "macos")]
+fn choose() -> u8 {
     let Some(main) = objc2::MainThreadMarker::new() else {
         return fail("picker_failed");
     };

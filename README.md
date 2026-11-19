@@ -10,14 +10,14 @@ Native ordinary/streaming CLI access is also embedded in the same executable; se
 
 ## Build and check
 
-Use Rust 1.99.1 and Node 24.20.0 from this standalone project. The source manifest declares one placeholder Backend for each supported target:
+Use Rust 1.99.1 and Node 24.20.0 or later from this standalone project. The source manifest declares one placeholder Backend for each supported target:
 
 | Machine | Rust target |
 |---|---|
 | macOS on Apple Silicon | `aarch64-apple-darwin` |
 | Linux on x86_64 with glibc | `x86_64-unknown-linux-gnu` |
 
-On Linux, install Rust through rustup so that `rust-toolchain.toml` selects 1.99.1, install Node 24.20.0, and install a C toolchain that provides the system linker (`build-essential` on Ubuntu).
+On Linux, install Rust through rustup so that `rust-toolchain.toml` selects 1.99.1, install Node 24.20.0 or later, and install a C toolchain that provides the system linker (`build-essential` on Ubuntu). The Ubuntu 26.04 qualification VM uses its installed Node 26. Linux qualification is still pending, so these prerequisites do not claim a qualified Linux build.
 
 ```sh
 npm ci
@@ -31,6 +31,13 @@ git diff --check
 ```
 
 The build is native only. It builds for the target that `rustc -vV` (or `$RUSTC -vV`) reports as its host, and the assembled Package Directory declares only that target's Backend. `npm run build -- --target <triple>` confirms the target: it refuses any other target, or any other argument, with exit status 2 before it runs Cargo or changes `dist/`. Cargo always builds with that explicit `--target`, and the assembler takes the Backend from `<triple>/release/` inside Cargo's target directory (`target/` unless `CARGO_TARGET_DIR` or `build.target-dir` says otherwise), so a Cargo `build.target` setting cannot leave a stale binary in its place. Cross-compilation is not supported, so build each target on its own machine.
+
+Each target ships a slightly different set of third-party components:
+
+- Only `aarch64-apple-darwin` ships the native folder chooser and its dependencies: `rfd` 0.16.1, `objc2` 0.6.5, `objc2-encode` 4.1.0, `objc2-foundation` 0.3.2 and `block2` 0.6.2 (MIT); `objc2-app-kit` 0.3.2, `objc2-core-foundation` 0.3.2 and `dispatch2` 0.3.1 (Zlib OR Apache-2.0 OR MIT); `raw-window-handle` 0.6.2 (MIT OR Apache-2.0 OR Zlib); and `log` 0.4.35 (MIT OR Apache-2.0).
+- Only `x86_64-unknown-linux-gnu` ships `linux-raw-sys` 0.12.1 (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT), the Linux backend of `rustix`.
+
+The embedded notices that `tmx --licenses` prints cover the union of both targets, so a given binary may not contain every listed component. To list the full set for one target, run `cargo tree --locked -p teamarness-generated-package-backend -e normal --target <triple>`.
 
 The build performs locked release compilation, UI assembly, final manifest/digest validation and a Backend smoke handshake. `npm test` includes vendor integrity, exact direct pins, contract/generated-type checks, locked workspace Rust tests, UI tests and assembler tests. A smoke handshake is not an HTTP or real-Host proof.
 

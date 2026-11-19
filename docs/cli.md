@@ -1,6 +1,6 @@
 # Native CLI (interaction major 1)
 
-The single Apple Silicon macOS Backend artifact also provides native `tmx` mode.
+Each native Backend artifact (Apple Silicon macOS, or x86_64 Linux with glibc) also provides native `tmx` mode.
 No Node, npm, source checkout or interpreter is needed at runtime. It provides ordinary operations, live subscriptions and recoverable managed
 command/skill setup with native folder selection and owning-Installation refresh.
 No installed-access qualification is claimed.
@@ -161,11 +161,16 @@ credentials in owned private OS-user files at
 `~/.local/bin/tmx`; PATH setup is optional and shell startup files are not edited.
 The portable skill must not include this private store path or credentials.
 
-Production resolves the effective OS user's home using the fixed macOS system
-utility `/usr/bin/dscacheutil -q user -a uid <effective-uid>`. HOME, cwd and public
-flags cannot redirect it. The lookup has a two-second deadline, bounded captured
-output, successful-exit/unambiguous absolute-directory checks and kill/reap on
-failure. Descriptor-relative no-follow traversal then validates ownership and
+Production resolves the effective OS user's home from the OS account database,
+never from `HOME`. On macOS it runs the fixed system utility
+`/usr/bin/dscacheutil -q user -a uid <effective-uid>`. On Linux it runs
+`/usr/bin/getent passwd <effective-uid>` with an empty environment and accepts
+exactly one passwd line of exactly seven colon-separated fields whose UID field
+equals the effective UID and whose home field is absolute and control-free.
+HOME, cwd and public flags cannot redirect either lookup. Both have a two-second
+deadline, bounded captured output, successful-exit/unambiguous absolute-directory
+checks and kill/reap on failure; any failure is `cli.home_unavailable`, with no
+fallback. Descriptor-relative no-follow traversal then validates ownership and
 unsafe write permissions. Existing safe intermediate modes remain unchanged;
 new private directories are 0700 and records/lock are owned single-link 0600.
 There are at most 128 records of at most 16 KiB, named deterministically by

@@ -209,6 +209,116 @@ async fn os_home_adapter_rejects_errors_ambiguity_overflow_and_timeout_without_f
     }
 }
 #[test]
+fn linux_getent_parser_accepts_only_one_exact_effective_user_entry() {
+    // Pure parser; runs on every platform and never consults the real account database.
+    use teamarness_generated_package_backend::cli::home::parse_getent;
+    assert_eq!(
+        parse_getent(
+            b"fixture:x:501:20:Fixture:/home/fixture user:/bin/sh\n",
+            501
+        )
+        .unwrap(),
+        std::path::PathBuf::from("/home/fixture user")
+    );
+    assert_eq!(
+        parse_getent(b"root:x:0:0::/:/bin/sh", 0).unwrap(),
+        std::path::PathBuf::from("/")
+    );
+    for (bytes, uid) in [
+        (
+            b"fixture:x:502:20:Fixture:/home/fixture:/bin/sh\n".as_slice(),
+            501,
+        ),
+        (b"fixture:x:0501:20:Fixture:/home/fixture:/bin/sh\n", 501),
+        (b"fixture:x:+501:20:Fixture:/home/fixture:/bin/sh\n", 501),
+        (
+            b"fixture:x:501:20:Fixture:/home/a:/bin/sh\nfixture:x:501:20:Fixture:/home/b:/bin/sh\n",
+            501,
+        ),
+        (b"fixture:x:501:20:Fixture:/home/a:/bin/sh\n\n", 501),
+        (b"\nfixture:x:501:20:Fixture:/home/a:/bin/sh\n", 501),
+        (b"fixture:x:501:20:Fixture:/home/fixture\n", 501),
+        (
+            b"fixture:x:501:20:Fixture:/home/fixture:/bin/sh:extra\n",
+            501,
+        ),
+        (b"fixture:x:501:20:Fixture:home/fixture:/bin/sh\n", 501),
+        (b"fixture:x:501:20:Fixture::/bin/sh\n", 501),
+        (b"fixture:x:501:20:Fixture:/home/a\x00b:/bin/sh\n", 501),
+        (b"fixture:x:501:20:Fixture:/home/a\tb:/bin/sh\n", 501),
+        (b"fixture:x:501:20:Fixture:/home/a\x7f:/bin/sh\n", 501),
+        (b"", 501),
+        (b"\n", 501),
+        (b"fixture:x:501:20:\xff:/home/fixture:/bin/sh\n", 501),
+        // The macOS dscacheutil shape is never accepted by the Linux parser.
+        (b"name: fixture\ndir: /home/fixture\n", 501),
+    ] {
+        assert_eq!(
+            parse_getent(bytes, uid).unwrap_err().code,
+            "cli.home_unavailable",
+            "{bytes:?}"
+        );
+    }
+}
+#[tokio::test]
+async fn linux_getent_lookup_rejects_exit_overflow_and_timeout_without_fallback() {
+    use teamarness_generated_package_backend::cli::home::{lookup_with, parse_getent};
+    let parser = |bytes: &[u8]| parse_getent(bytes, 501);
+    let ok = lookup_with(
+        tokio::process::Command::new("/bin/sh")
+            .args(["-c", "printf 'f:x:501:20::/home/f:/bin/sh\\n'"])
+            .env_clear(),
+        parser,
+    )
+    .await
+    .unwrap();
+    assert_eq!(ok, std::path::PathBuf::from("/home/f"));
+    for script in [
+        "printf 'f:x:501:20::/home/f:/bin/sh\\n'; exit 2",
+        "exec /bin/sleep 10",
+        "/usr/bin/yes x | /usr/bin/head -c 16385",
+        "/usr/bin/yes x | /usr/bin/head -c 4097 >&2; printf 'f:x:501:20::/home/f:/bin/sh\\n'",
+    ] {
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(4),
+            lookup_with(
+                tokio::process::Command::new("/bin/sh")
+                    .args(["-c", script])
+                    .env_clear(),
+                parser,
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.unwrap_err().code, "cli.home_unavailable", "{script}");
+    }
+}
+#[test]
+fn notices_cover_linux_only_rustix_backend_and_state_both_targets() {
+    let text = teamarness_generated_package_backend::cli::third_party_notices();
+    assert!(text.contains(
+        "Component list: locked normal production Backend dependencies for both supported targets, aarch64-apple-darwin and x86_64-unknown-linux-gnu"
+    ));
+    assert!(text.contains("A given native binary may not contain every listed component."));
+    let entry = "linux-raw-sys 0.12.1\n\
+License: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT\n\
+Repository: https://github.com/sunfishcode/linux-raw-sys\n\
+Authors (upstream metadata): Dan Gohman <dev@sunfishcode.online>\n\
+Notice source: https://crates.io/crates/linux-raw-sys/0.12.1; registry source checksum in Cargo.lock; COPYRIGHT, LICENSE-APACHE, LICENSE-Apache-2.0_WITH_LLVM-exception, LICENSE-MIT; Linux-only rustix backend (x86_64-unknown-linux-gnu)\n\
+Literal notice SHA-256: 3290ae0fbc9ddb77d2239121d710f0bb9d31b3b4744e6d97fe01e652b4c1870b, a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2, 268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5, 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3\n";
+    assert!(text.contains(entry));
+    // Its COPYRIGHT names linux-raw-sys, so it is stored literally rather than shared with rustix.
+    let copyright = text
+        .split_once(
+            "\n===== SHA-256 3290ae0fbc9ddb77d2239121d710f0bb9d31b3b4744e6d97fe01e652b4c1870b =====\n",
+        )
+        .unwrap()
+        .1;
+    assert!(copyright.starts_with(
+        "Short version for non-lawyers:\n\n`linux-raw-sys` is triple-licensed under Apache 2.0 with the LLVM Exception,\n"
+    ));
+}
+#[test]
 fn cursor_target_and_input_depth_boundaries_reject_before_sockets() {
     use teamarness_generated_package_backend::cli::args::parse;
     let cursor = "A".repeat(2731);
@@ -307,7 +417,7 @@ fn licenses_are_offline_embedded_and_reject_other_arguments() {
         .collect::<String>();
     assert_eq!(
         hash,
-        "ec776f9c33537ea40c5049518ba03cd7ded30ed836863a59fb2a856d959e9af3"
+        "6bee8926c87f2657779ce17a234f958c7c57440e60bf97e572e659f38dfc4fe7"
     );
     // Independent original registry notice, not an expectation decoded by the CLI.
     let rfd = include_bytes!("fixtures/notices/rfd-0.16.1-LICENSE");
@@ -372,5 +482,5 @@ fn embedded_literal_notice_checksums_are_intact() {
         );
         count += 1;
     }
-    assert_eq!(count, 82);
+    assert_eq!(count, 83);
 }

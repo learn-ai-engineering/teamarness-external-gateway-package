@@ -25,6 +25,8 @@ http.workspace = true
 bytes.workspace = true
 teamarness-package-contract = { path = "../vendor/teamarness/package-contract" }
 
+# The native folder chooser is macOS-only; other targets refuse before any helper work.
+[target.'cfg(target_os = "macos")'.dependencies]
 rfd.workspace = true
 objc2.workspace = true
 objc2-app-kit.workspace = true

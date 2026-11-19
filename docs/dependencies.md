@@ -8,7 +8,7 @@ The npm workspace retains exact TypeScript, Vite, Vitest and ESLint toolchain pi
 
 ## Native CLI ordinary transport
 
-Pinned Hyper 1.11.1 additionally enables its HTTP/1 client; the existing pinned Tokio 1.53.1 adds signal handling. Hyper adds locked MIT-licensed `try-lock` 0.2.5 and `want` 0.3.2. Serde JSON enables raw-value validation to preserve original numeric bytes. Existing pinned jsonschema validates shared HTTP envelopes, not Provider authorization. No additional HTTP stack is introduced. Effective-user home lookup uses the macOS system utility `/usr/bin/dscacheutil` through a bounded fixed-argument OS adapter, avoiding unsafe passwd FFI or another directory dependency; it is a system runtime dependency, not an interpreter or bundled artifact. Apple Silicon macOS remains the only declared target. Existing rustix pins/features and SDK provenance remain unchanged.
+Pinned Hyper 1.11.1 additionally enables its HTTP/1 client; the existing pinned Tokio 1.53.1 adds signal handling. Hyper adds locked MIT-licensed `try-lock` 0.2.5 and `want` 0.3.2. Serde JSON enables raw-value validation to preserve original numeric bytes. Existing pinned jsonschema validates shared HTTP envelopes, not Provider authorization. No additional HTTP stack is introduced. Effective-user home lookup uses the macOS system utility `/usr/bin/dscacheutil`, or on Linux `/usr/bin/getent passwd`, through a bounded fixed-argument OS adapter, avoiding unsafe passwd FFI or another directory dependency; it is a system runtime dependency, not an interpreter or bundled artifact. The supported targets are `aarch64-apple-darwin` and `x86_64-unknown-linux-gnu`. Existing rustix pins/features and SDK provenance remain unchanged.
 
 
 ## Recognized managed outputs
@@ -25,7 +25,10 @@ production-home setup is not part of build or smoke validation.
 
 ## Native chooser (Package 1.1.0)
 
-Exact approved direct pins are RFD `=0.16.1` (default features off), objc2
+The chooser and its dependencies are macOS-only: RFD, objc2 and objc2-app-kit are
+`[target.'cfg(target_os = "macos")'.dependencies]` in `backend/Cargo.toml`. Root
+workspace pins and Cargo.lock are unchanged, and the Linux Backend compiles none of
+them. Exact approved direct pins are RFD `=0.16.1` (default features off), objc2
 `=0.6.5`, and objc2-app-kit `=0.3.2` (default features off, `std` and
 `NSApplication`). The latter explicit dependency initializes AppKit on the helper's
 OS main thread before synchronous RFD. No async dialog, portal, interpreter,
@@ -54,8 +57,14 @@ license clearance. Required notices are embedded in
 `backend/resources/THIRD_PARTY_NOTICES.json` with per-component source URLs, tags,
 registry versions, authors and literal-text checksums. The static resource also
 retains encountered existing production notices, including rustix LLVM exception
-and Teamarness notices (113 native normal dependency components, 82 distinct
-literal notices). Missing split-crate notices use the identical repository
+and Teamarness notices (114 native normal dependency components across both
+supported targets, 83 distinct literal notices). The component list is the union
+of `cargo tree -e normal` for `aarch64-apple-darwin` (113 components) and
+`x86_64-unknown-linux-gnu` (104 components): ten chooser components are macOS-only,
+and `linux-raw-sys` 0.12.1, rustix's Linux backend, is Linux-only. Its three
+license files are byte-identical to rustix's stored texts and are referenced by
+SHA-256; its COPYRIGHT names linux-raw-sys, so that text is stored literally. A
+given binary may not contain every listed component. Missing split-crate notices use the identical repository
 release source, not invented text. No general notice generator/updater was added.
 Installed users retrieve the complete resource via offline `tmx --licenses`;
 final assembly compares those bytes in explicit and basename CLI modes. Thus
@@ -65,11 +74,11 @@ Final `otool -L` inspection records system framework dependencies separately fro
 native/manual acquired-artifact execution qualification.
 
 The resource is a JSON-escaped UTF-8 string so literal upstream CRLF/trailing
-spaces are retained without whitespace-check exceptions. The 295,822 decoded
-bytes have SHA-256 `ec776f9c33537ea40c5049518ba03cd7ded30ed836863a59fb2a856d959e9af3`;
+spaces are retained without whitespace-check exceptions. The 297,656 decoded
+bytes have SHA-256 `6bee8926c87f2657779ce17a234f958c7c57440e60bf97e572e659f38dfc4fe7`;
 per-notice original byte hashes remain inside the decoded provenance. Exact raw
 RFD source notice is also an independent test fixture. Native tests pin original
 CRLF/trailing spaces; assembly compares a separate JavaScript JSON decode against
 the Rust CLI output and the encoded resource against the executable bytes.
 
-Encoded resource SHA-256: `7c2f017023a9173d0b586c3e0a20c0c875d5383630aeadcc118c83f52b1b8e12`.
+Encoded resource SHA-256: `596018d981d7fe5f0ed1d9ab26778c2c68382d932a7874932cdcc0b24f326770`.

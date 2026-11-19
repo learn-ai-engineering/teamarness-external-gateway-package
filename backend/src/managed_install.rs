@@ -209,6 +209,9 @@ pub(crate) struct Identity {
 }
 fn identity(f: &File) -> Result<Identity> {
     let s = io(sys::fstat(f))?;
+    // Stat field widths are per target: st_dev is i32 on macOS and u64 on Linux. The
+    // cast from its declared platform alias keeps the persisted macOS identity value
+    // unchanged and is a no-op on Linux; `From` does not exist for both widths.
     Ok(Identity {
         dev: s.st_dev as u64,
         ino: s.st_ino,
@@ -231,7 +234,9 @@ fn file_safe(f: &File, mode: u32) -> Result<()> {
     if s.st_uid != rustix::process::geteuid().as_raw()
         || FileType::from_raw_mode(s.st_mode) != FileType::RegularFile
         || s.st_nlink != 1
-        || u32::from(s.st_mode) & 0o7777 != mode
+        // st_mode is u16 on macOS and u32 on Linux; widening from its platform alias
+        // is lossless on both, while `u32::from` is a same-type conversion on Linux.
+        || (s.st_mode as u32) & 0o7777 != mode
     {
         return Err(InstallError::Unsafe);
     }

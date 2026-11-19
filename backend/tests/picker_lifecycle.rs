@@ -1,14 +1,21 @@
 //! Real children/private pipes + injected-home Backend; not native AppKit/manual qualification.
+//! The production chooser path exists only on macOS: tests that subscribe through it are
+//! gated to macOS, and other targets instead prove the refusal precedes hashing and spawn.
+//! The private lifeline test drives the fixture child directly and runs everywhere.
 mod http_support;
-use http_support::{Provider, membership_support};
+#[cfg(target_os = "macos")]
+use http_support::Provider;
+use http_support::membership_support;
 #[path = "support/setup.rs"]
 mod support;
 use serde_json::{Value, json};
+#[cfg(target_os = "macos")]
+use std::sync::{Arc, Mutex};
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
     time::Duration,
 };
+#[cfg(target_os = "macos")]
 use teamarness_package_sdk::testing::{Harness, HarnessSubscription};
 const PICK: &str = "external-gateway.setup.choose-skill-folder";
 fn executable() -> PathBuf {
@@ -44,6 +51,7 @@ fn fixture(mode: &str) -> support::Fixture {
     std::fs::create_dir(f.data.path().join("chosen")).unwrap();
     f
 }
+#[cfg(target_os = "macos")]
 async fn result(
     s: &mut HarnessSubscription,
 ) -> Option<Result<Value, teamarness_package_sdk::BackendError>> {
@@ -79,6 +87,7 @@ async fn reaped(pid: u32) {
     .await
     .expect("owned helper reaped, not zombie");
 }
+#[cfg(target_os = "macos")]
 async fn preview(h: &mut Harness, id: &Value) -> Value {
     h.request(
         "external-gateway.setup.preview",
@@ -87,6 +96,7 @@ async fn preview(h: &mut Harness, id: &Value) -> Value {
     .await
     .unwrap()
 }
+#[cfg(target_os = "macos")]
 #[tokio::test]
 async fn child_faults_have_safe_errors_and_never_select() {
     for mode in [
@@ -122,6 +132,7 @@ async fn child_faults_have_safe_errors_and_never_select() {
     reaped(pid(&f).await).await;
     h.shutdown().await.unwrap();
 }
+#[cfg(target_os = "macos")]
 #[tokio::test]
 async fn admitted_digest_mismatch_refuses_before_spawn() {
     let f = fixture("selected");
@@ -136,6 +147,7 @@ async fn admitted_digest_mismatch_refuses_before_spawn() {
     assert!(!f.source.with_extension("pid").exists());
     h.shutdown().await.unwrap();
 }
+#[cfg(target_os = "macos")]
 #[tokio::test]
 async fn exact_selection_lease_invalidates_unaccepted_plan_but_not_owned_apply() {
     let f = fixture("safe-stderr");
@@ -197,6 +209,7 @@ async fn exact_selection_lease_invalidates_unaccepted_plan_but_not_owned_apply()
     assert!(f.data.path().join("chosen/teamarness/SKILL.md").is_file());
     h.shutdown().await.unwrap();
 }
+#[cfg(target_os = "macos")]
 #[tokio::test]
 async fn four_bounded_selection_leases_release_children_and_capacity() {
     let f = fixture("selected");
@@ -222,6 +235,7 @@ async fn four_bounded_selection_leases_release_children_and_capacity() {
     s.close().await;
     h.shutdown().await.unwrap();
 }
+#[cfg(target_os = "macos")]
 #[tokio::test]
 async fn unsubscribe_suspend_dispose_kill_and_reap_without_late_selection() {
     for lifecycle in ["unsubscribe", "suspend", "dispose"] {
@@ -277,6 +291,7 @@ async fn unsubscribe_suspend_dispose_kill_and_reap_without_late_selection() {
     );
     h.shutdown().await.unwrap();
 }
+#[cfg(target_os = "macos")]
 #[tokio::test]
 async fn pending_beyond_thirty_seconds_keeps_health_status_and_real_http_calls_responsive() {
     let f = fixture("hold");
@@ -357,6 +372,7 @@ async fn parent_only_sigkill_closes_private_lifeline_without_appkit() {
     reaped(p).await;
 }
 
+#[cfg(target_os = "macos")]
 #[tokio::test]
 async fn selected_lease_suspension_invalidates_preview_and_explicit_recovery_can_choose_again() {
     let f = fixture("selected");
@@ -388,5 +404,43 @@ async fn selected_lease_suspension_invalidates_preview_and_explicit_recovery_can
         .is_err()
     );
     s.close().await;
+    h.shutdown().await.unwrap();
+}
+#[cfg(not(target_os = "macos"))]
+#[tokio::test]
+async fn non_macos_chooser_refuses_before_hashing_or_spawn_and_setup_still_inspects() {
+    // Intact admitted fixture: on macOS this would spawn and select.
+    let f = fixture("selected");
+    let (mut h, _) = f.start().await;
+    for _ in 0..5 {
+        let e = h.subscribe_confirmed(PICK, json!({})).await.err().unwrap();
+        assert_eq!(e.code(), "external_gateway.picker_unavailable");
+        assert!(!e.retryable());
+        assert_eq!(e.details(), &json!({}));
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        !f.source.with_extension("pid").exists(),
+        "no helper spawned"
+    );
+    // Setup without a skill is unaffected by the refusal.
+    h.request("external-gateway.setup.inspect", json!({}))
+        .await
+        .unwrap();
+    h.shutdown().await.unwrap();
+    // Changed admitted bytes would be reload_required if hashing ran first.
+    let f = fixture("selected");
+    let env = f.environment();
+    std::fs::write(&f.source, b"changed admitted bytes").unwrap();
+    let (mut h, _) = f.start_with(env).await;
+    assert_eq!(
+        h.subscribe_confirmed(PICK, json!({}))
+            .await
+            .err()
+            .unwrap()
+            .code(),
+        "external_gateway.picker_unavailable"
+    );
+    assert!(!f.source.with_extension("pid").exists());
     h.shutdown().await.unwrap();
 }
