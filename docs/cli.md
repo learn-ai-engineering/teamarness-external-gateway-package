@@ -10,6 +10,9 @@ with `--tmx-cli --help`, `--tmx-cli --version` or `--tmx-cli --skill`. A copy na
 mode even without arguments. The admitted executable with no arguments remains
 the Backend. Invalid arguments never enter Host stdio. `--tmx-picker` is a private native-helper entry, not a CLI command. There is no public endpoint or credential-path option.
 
+To install and connect `tmx` on a node without the desktop Configuration page,
+follow [headless onboarding](headless-onboarding.md).
+
 ```text
 tmx workspaces
 tmx --workspace <id-or-exact-unique-name> status
