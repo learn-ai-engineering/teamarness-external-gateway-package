@@ -477,11 +477,13 @@ fn skill_is_offline_rendered_for_the_canonical_invoked_executable() {
     let exe = env!("CARGO_BIN_EXE_teamarness-generated-package-backend");
     let dir = tempfile::tempdir().unwrap();
     // Temporary directories are reached through a symlinked /var on macOS; output is canonical.
+    // Linux /tmp is not a symlink, so there the `link dir` symlink below alone proves it.
     let folder = dir.path().join("it's a dir");
     std::fs::create_dir(&folder).unwrap();
     let copy = folder.join("tmx");
     std::fs::copy(exe, &copy).unwrap();
     let canonical = copy.canonicalize().unwrap();
+    #[cfg(target_os = "macos")]
     assert_ne!(canonical, copy);
     let links = dir.path().join("link dir");
     std::fs::create_dir(&links).unwrap();
