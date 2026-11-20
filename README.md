@@ -17,7 +17,7 @@ Use Rust 1.99.1 and Node 24.20.0 or later from this standalone project. The sour
 | macOS on Apple Silicon | `aarch64-apple-darwin` |
 | Linux on x86_64 with glibc | `x86_64-unknown-linux-gnu` |
 
-On Linux, install Rust through rustup so that `rust-toolchain.toml` selects 1.99.1, install Node 24.20.0 or later, and install a C toolchain that provides the system linker (`build-essential` on Ubuntu). The Ubuntu 26.04 qualification VM uses its installed Node 26. Slice A's automated checks (`npm run validate`, `typecheck`, `lint`, `test` and `build`) pass natively on Ubuntu 26.04 x86_64. Qualification against a real headless Host is still pending, so these prerequisites do not claim a Host-qualified Linux installation.
+On Linux, install Rust through rustup so that `rust-toolchain.toml` selects 1.99.1, install Node 24.20.0 or later, and install a C toolchain that provides the system linker (`build-essential` on Ubuntu). The Ubuntu 26.04 qualification VM uses its installed Node 26. The automated checks (`npm run validate`, `typecheck`, `lint`, `test` and `build`) pass natively on Ubuntu 26.04 x86_64; qualification against a real headless Host is pending, so these prerequisites do not claim a Host-qualified Linux installation.
 
 ```sh
 npm ci

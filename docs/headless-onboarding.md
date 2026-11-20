@@ -98,11 +98,13 @@ Enabling a package selects no tools. List its tools with
 
 A page holds at most 32 tools. If `nextOffset` is not `null`, request the next
 page with the same contract and that offset, and continue until `nextOffset` is
-`null`:
+`null`. For example, if `nextOffset` is `32`:
 
 ```json
-{"contract":"dev.test.reads","offset":<nextOffset>}
+{"contract":"dev.test.reads","offset":32}
 ```
+
+Use the `nextOffset` value from the previous page, not a calculated value.
 
 Every tool has `selected` `false` at this point. Select each tool separately
 with `external-gateway.tool.set`, using its `fingerprint` from the tool list:
@@ -214,14 +216,23 @@ the installed command and write it to the external agent's skill folder:
 ```sh
 (
   umask 077
-  mkdir -p '<agent skill folder>/teamarness'
-  ~/.local/bin/tmx --skill > '<agent skill folder>/teamarness/SKILL.md'
+  dir="$HOME/<agent skill folder>/teamarness"
+  mkdir -p "$dir" &&
+    ~/.local/bin/tmx --skill > "$dir/SKILL.md.tmp" &&
+    mv "$dir/SKILL.md.tmp" "$dir/SKILL.md"
 )
 ```
 
+Replace `"$HOME/<agent skill folder>"` with the skill folder's path under your
+home, or with its absolute path. Do not write `~` inside quotes: a quoted `~`
+does not expand.
+
 The subshell's `umask 077` makes new folders and the new file owner-only,
-without changing your shell's umask. Existing folders and files keep their
-modes. The skill contains no credential. Rerun the command after a CLI update. See
+without changing your shell's umask. Existing folders keep their modes. Each
+step runs only if the previous step succeeded, and the skill is written to
+`SKILL.md.tmp` first. If `tmx --skill` fails, the command stops and leaves any
+existing `SKILL.md` unchanged; delete `SKILL.md.tmp` and run the command again.
+The skill contains no credential. Rerun the command after a CLI update. See
 [Manual skill installation with `tmx --skill`](cli.md#manual-skill-installation-with-tmx---skill).
 
 ## Common errors
@@ -239,8 +250,9 @@ modes. The skill contains no credential. Rerun the command after a CLI update. S
 | `external_gateway.connection_origin_conflict` | Another Installation or profile owns this Workspace's local connection. | Disconnect from the original profile. See [CLI usage and client custody](cli.md#credential-custody). |
 | `external_gateway.output_collision` | A file at the command path is not a recognized install. | Inspect and remove or move the file yourself, then preview again. |
 | `external_gateway.output_consent_required` | The command needs an explicit update. | Preview and apply `install-cli`. |
-| `external_gateway.output_unsafe` | A directory on the output path, for example `~/.local`, `~/.local/bin`, `~/.local/share`, `~/.local/share/teamarness` or the home directory or one of its ancestors, is group- or world-writable, or is owned by another user (only the home's ancestors may be owned by `root`). A group-writable directory is common when it was created under Ubuntu's default `0002` umask. `setup.inspect` reports this code in `cli.issue`, with `cli.state` `blocked` unless only `~/.local/bin` is affected; `setup.preview` fails with it. | Run `chmod go-w <dir>` on each such directory that you own, then inspect and preview again. |
-| `external_gateway.client_store_invalid` | The private client store under `~/.local/share/teamarness/external-gateway/` is unsafe or unreadable, for example because `~/.local` or `~/.local/share` is group- or world-writable. `setup.inspect` reports it as `connection.issue`. | Fix the directory modes as for `output_unsafe`, then inspect again. |
+| `external_gateway.output_unsafe` | A directory on the output path, for example the home directory or one of its ancestors, `~/.local`, `~/.local/bin`, `~/.local/share`, `~/.local/share/teamarness` or `~/.local/share/teamarness/external-gateway`, is unsafe: it is group- or world-writable, or it is owned by another user. Directories other than the output's own folder may be owned by `root`, and a `root`-owned directory with the sticky bit, such as `/tmp`, may be writable by others. A group-writable directory is common when it was created under Ubuntu's default `0002` umask. `setup.inspect` reports this code in `cli.issue`, with `cli.state` `blocked`. `setup.preview` fails with it for `install-cli`, and for other intents when the directory became unsafe after the Backend activated. If the home directory, one of its ancestors, `~/.local`, `~/.local/share` or a directory under it was already unsafe when the Backend activated, other intents fail with `external_gateway.setup_state_invalid` instead, until the Package is reloaded. A `~/.local/bin` that is unsafe at activation does not cause this. | Fix the modes of each such directory that you own. Run `chmod go-w <dir>` on the home directory, `~/.local`, `~/.local/bin` and `~/.local/share`. Run `chmod 700 <dir>` on `~/.local/share/teamarness`, `~/.local/share/teamarness/external-gateway` and, if they exist, its `managed` and `setup` folders, which must have mode exactly `0700`. Then reload the Package through the Host (`<host command>`; see [Host command wrapper (planned, unverified)](#host-command-wrapper-planned-unverified)), and inspect and preview again. |
+| `external_gateway.client_store_invalid` | The private client store under `~/.local/share/teamarness/external-gateway/` is unsafe or unreadable, for example because `~/.local` or `~/.local/share` is group- or world-writable, or because `~/.local/share/teamarness` or `~/.local/share/teamarness/external-gateway` does not have mode exactly `0700`. `setup.inspect` reports it as `connection.issue`. | Fix the directory modes as for `output_unsafe`. Then reload the Package through the Host (`<host command>`; see [Host command wrapper (planned, unverified)](#host-command-wrapper-planned-unverified)), and inspect and preview again. |
+| `external_gateway.setup_state_invalid` | When the Backend activated, it could not read or recover its setup state under `~/.local/share/teamarness/external-gateway/setup`, for example because a directory on that path was unsafe, or because the state file is not valid. Until the Package is reloaded, every `setup.preview` except `install-cli` fails with this code. `setup.inspect` can report `recovery.state` `none` after you fix the cause, but the refusal stays. | Fix the storage, for example the directory modes as for `output_unsafe`. Then reload the Package through the Host (`<host command>`; see [Host command wrapper (planned, unverified)](#host-command-wrapper-planned-unverified)), and inspect and preview again. |
 | `external_gateway.home_unavailable` | The Backend could not resolve its OS user's home. The Backend does not activate. | See [Prerequisites](#prerequisites). |
 | `external_gateway.reload_required` | The Backend's admitted bytes changed. | Reload the Package, then preview again. |
 | `external_gateway.forbidden` | `tmx call` to a tool that is not selected. | Select the tool with `tool.set`. |

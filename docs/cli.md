@@ -370,13 +370,22 @@ names that copy:
 ```sh
 (
   umask 077
-  mkdir -p '<agent skill folder>/teamarness'
-  ~/.local/bin/tmx --skill > '<agent skill folder>/teamarness/SKILL.md'
+  dir="$HOME/<agent skill folder>/teamarness"
+  mkdir -p "$dir" &&
+    ~/.local/bin/tmx --skill > "$dir/SKILL.md.tmp" &&
+    mv "$dir/SKILL.md.tmp" "$dir/SKILL.md"
 )
 ```
 
-The subshell's `umask 077` keeps new folders and the file owner-only without
-changing the calling shell's umask; existing folders and files keep their modes.
+Replace `"$HOME/<agent skill folder>"` with the skill folder's path under your
+home, or with its absolute path. A quoted `~` does not expand, so do not use it
+inside the quotes.
+
+The subshell's `umask 077` keeps new folders and the new file owner-only without
+changing the calling shell's umask; existing folders keep their modes. The
+commands are chained with `&&`, and the skill is written to `SKILL.md.tmp`
+before it replaces `SKILL.md`. If `tmx --skill` fails, the chain stops and any
+existing `SKILL.md` is unchanged; delete `SKILL.md.tmp` and run it again.
 
 If you run it from another copy, such as a Package Directory's Backend
 executable, the skill names that copy instead. A manually written file has no

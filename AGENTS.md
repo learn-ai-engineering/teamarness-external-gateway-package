@@ -302,12 +302,11 @@ before Tokio, initializes AppKit and runs synchronous RFD on the OS main thread;
 fixed private request pipe is also the parent-EOF lifeline. Other targets have no
 native chooser: `Picker::choose` refuses `choose-skill-folder` before capacity or
 spawn with non-retryable `external_gateway.picker_unavailable`, and the helper
-emits `picker_failed`. Keep 4-KiB path,
-8-KiB frame/stderr and five-second terminal/cleanup budgets, no debug leakage or
-arbitrary helper/script arguments. `picker-fixture` is unassembled fault/lifeline
-evidence, never a claim of actual AppKit or installed behavior. Package version
-1.1.0 is manifest-owned; CLI/store major 1, process 1.1, capabilities and artifact
-shape remain independent. Native focus/installed M1–M5 remain Don-owned pending.
+emits `picker_failed`. Keep 4-KiB path, 8-KiB frame/stderr and five-second
+terminal/cleanup budgets, no debug leakage or arbitrary helper/script arguments.
+`picker-fixture` is unassembled fault/lifeline evidence, never a claim of actual
+AppKit or installed behavior. Package version 1.1.0 is manifest-owned; CLI/store
+major 1, process 1.1, capabilities and artifact shape remain independent. Native focus/installed M1–M5 remain Don-owned pending.
 `cli::THIRD_PARTY_NOTICES_JSON` embeds literal dependency notices and source provenance;
 `tmx --licenses` retrieves them offline before runtime/home/network/AppKit, as
 `tmx --skill` prints the portable skill for manual installation. Preserve
@@ -360,9 +359,11 @@ consents to the exact recognized output change; no second CLI confirmation is
 shown. Collisions remain refusal. Progress, errors and independently dismissible
 results belong above the controls in each CLI/connection/skill section. Required
 command publication in a valid already accepted pending Repair retains its
-targeted confirmation to avoid a recovery deadlock; only
-Repair can resume those reserved outputs, never the independent CLI action. Install skill… opens the native chooser and selection immediately
-prepares/applies only the skill, holding its lease through acceptance. Cancel and
+targeted confirmation to avoid a recovery deadlock; only Repair can resume those
+reserved outputs, never the independent CLI action. On macOS, Install skill…
+opens the native chooser and selection immediately prepares/applies only the
+skill, holding its lease through acceptance. On other targets the chooser
+request refuses with `external_gateway.picker_unavailable`. Cancel and
 stale/unmounted observations never apply; accepted work still outlives the view.
 Current connection facts never come from operation receipts or listener running
 state. Manual token one-time-secret cleanup and explicit denial recovery remain
