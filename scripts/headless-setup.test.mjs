@@ -54,13 +54,18 @@ function answers(f, extra = "") {
     host_data_dir: JSON.stringify(join(f.root, "data")),
     package_dir: JSON.stringify(f.packageDir),
     accept_native_code_risks: "true",
-    workspace_id: JSON.stringify(W),
+    workspace: JSON.stringify(W),
     listener: "true",
     connect: "true",
     tools: '"all"',
   };
   const lines = [];
-  for (const [k, v] of Object.entries(base)) if (!new RegExp(`^${k} *=`, "m").test(extra) && !(k === "tools" && /^\[tools\]/m.test(extra))) lines.push(`${k} = ${v}`);
+  for (const [k, v] of Object.entries(base)) {
+    if (new RegExp(`^${k} *=`, "m").test(extra)) continue;
+    if (k === "tools" && /^\[tools\]/m.test(extra)) continue;
+    if (k === "workspace" && /^workspace_id *=/m.test(extra)) continue;
+    lines.push(`${k} = ${v}`);
+  }
   writeFileSync(path, `${lines.join("\n")}\n${extra}\n`);
   return path;
 }
@@ -74,7 +79,7 @@ test("prints a template that parses with every key, and refuses to overwrite", (
   const f = fixture();
   const out = run(f, ["--print-template"]);
   assert.equal(out.status, 0);
-  for (const key of ["host_app", "host_data_dir", "package_dir", "accept_native_code_risks", "workspace_id", "listener", "connect", "tools"]) {
+  for (const key of ["host_app", "host_data_dir", "package_dir", "accept_native_code_risks", "workspace", "listener", "connect", "tools"]) {
     assert.match(out.stdout, new RegExp(`^${key} = `, "m"));
   }
   const path = join(f.root, "answers.toml");
@@ -86,7 +91,9 @@ test("prints a template that parses with every key, and refuses to overwrite", (
 
 for (const [name, extra, message] of [
   ["an unknown key", "colour = true", /unknown key/],
-  ["an empty workspace_id", 'workspace_id = " "', /workspace_id must be a Workspace name or its 32-character ID/],
+  ["an empty workspace", 'workspace = " "', /workspace must be a Workspace name or its 32-character ID/],
+  ["a name in workspace_id", 'workspace_id = "Headless"', /workspace_id must be the 32-character/],
+  ["both workspace and workspace_id", `workspace = "Headless"\nworkspace_id = "${W}"`, /set workspace or workspace_id, not both/],
   ["a wrong type", 'listener = "yes"', /listener has the wrong type/],
   ["connect without listener", "listener = false", /connect = true needs listener = true/],
   ["a bad tools value", 'tools = "some"', /tools must be/],
@@ -222,7 +229,7 @@ test("an unknown contract or port is invalid input", () => {
 
 test("a Workspace name resolves to its ID through the Host's Workspace list", () => {
   const f = fixture({ workspaces: [{ id: "b".repeat(32), name: "Other" }, { id: W, name: "Headless" }] });
-  const out = run(f, ["--answers", answers(f, 'workspace_id = "Headless"')]);
+  const out = run(f, ["--answers", answers(f, 'workspace = "Headless"')]);
   assert.equal(out.status, 0, out.stdout + out.stderr);
   assert.match(out.stdout, new RegExp(`^workspace: Headless ${W}$`, "m"));
   assert.match(out.stdout, /^summary: 7 changed, 1 unchanged, 0 stopped$/m);
@@ -233,19 +240,26 @@ test("an ID is checked against the Host's Workspace list", () => {
   const out = run(f, ["--answers", answers(f)]);
   assert.equal(out.status, 0, out.stdout + out.stderr);
   assert.match(out.stdout, new RegExp(`^workspace: Headless ${W}$`, "m"));
-  const missing = run(f, ["--answers", answers(f, `workspace_id = "${"c".repeat(32)}"`)]);
+  const missing = run(f, ["--answers", answers(f, `workspace = "${"c".repeat(32)}"`)]);
   assert.equal(missing.status, 2);
   assert.match(missing.stdout, /^stopped: workspace 'c{32}' matches no Workspace on this Host; list them with: tm workspace list/m);
 });
 
 test("a name that matches no Workspace, or more than one, stops with exit 2 before any change", () => {
   const f = fixture({ workspaces: [{ id: W, name: "Team" }, { id: "b".repeat(32), name: "Team" }, { id: "e".repeat(32), name: "Solo" }] });
-  const none = run(f, ["--answers", answers(f, 'workspace_id = "Nope"')]);
+  const none = run(f, ["--answers", answers(f, 'workspace = "Nope"')]);
   assert.equal(none.status, 2);
   assert.match(none.stdout, /^stopped: workspace 'Nope' matches no Workspace on this Host/m);
   assert.deepEqual(none.state.log, []);
-  const two = run(f, ["--answers", answers(f, 'workspace_id = "Team"')]);
+  const two = run(f, ["--answers", answers(f, 'workspace = "Team"')]);
   assert.equal(two.status, 2);
-  assert.match(two.stdout, new RegExp(`^stopped: workspace 'Team' matches more than one Workspace \\(${W}, ${"b".repeat(32)}\\); set workspace_id to one of these IDs$`, "m"));
+  assert.match(two.stdout, new RegExp(`^stopped: workspace 'Team' matches more than one Workspace \\(${W}, ${"b".repeat(32)}\\); set workspace to one of these IDs$`, "m"));
   assert.deepEqual(two.state.log, []);
+});
+
+test("an older answers file with workspace_id still works", () => {
+  const f = fixture();
+  const out = run(f, ["--answers", answers(f, `workspace_id = "${W}"`)]);
+  assert.equal(out.status, 0, out.stdout + out.stderr);
+  assert.match(out.stdout, new RegExp(`^workspace: Headless ${W}$`, "m"));
 });

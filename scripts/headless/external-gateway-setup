@@ -51,7 +51,8 @@ accept_native_code_risks = false
 
 # Workspace to configure: its name as shown in the desktop app, or its 32-character ID.
 # Setup looks it up in the Host's Workspace list and stops if no Workspace or more than one matches.
-workspace_id = ""
+# (Older answers files may set workspace_id, an ID only, instead. Set one of the two, not both.)
+workspace = ""
 
 # Start the loopback listener. Connect needs it.
 listener = true
@@ -72,9 +73,11 @@ tools = "all"
 
 KEYS = {
     "host_app": str, "host_data_dir": str, "package_dir": str,
-    "accept_native_code_risks": bool, "workspace_id": str,
+    "accept_native_code_risks": bool, "workspace": str,
     "listener": bool, "connect": bool, "tools": (str, dict),
 }
+# Accepted in place of "workspace" so existing answers files keep working: an ID only.
+LEGACY = {"workspace_id": str}
 
 class Stop(Exception):
     def __init__(self, line, code=1):
@@ -100,17 +103,26 @@ def load_answers(path):
         invalid(f"answers file not found: {path}")
     except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
         invalid(f"answers file is not valid TOML: {e}")
-    unknown = sorted(set(data) - set(KEYS))
+    unknown = sorted(set(data) - set(KEYS) - set(LEGACY))
     if unknown:
         invalid("unknown key(s): " + ", ".join(unknown))
+    if "workspace" in data and "workspace_id" in data:
+        invalid("set workspace or workspace_id, not both")
+    if "workspace_id" in data:
+        if not isinstance(data["workspace_id"], str):
+            invalid("workspace_id has the wrong type")
+        if not re.fullmatch(r"[0-9a-f]{32}", data["workspace_id"]):
+            invalid("workspace_id must be the 32-character lowercase hexadecimal Workspace ID; "
+                    "use workspace for a name")
+        data["workspace"] = data.pop("workspace_id")
     missing = sorted(set(KEYS) - set(data))
     if missing:
         invalid("missing key(s): " + ", ".join(missing))
     for key, kind in KEYS.items():
         if not isinstance(data[key], kind):
             invalid(f"{key} has the wrong type")
-    if not data["workspace_id"].strip():
-        invalid("workspace_id must be a Workspace name or its 32-character ID")
+    if not data["workspace"].strip():
+        invalid("workspace must be a Workspace name or its 32-character ID")
     tools = data["tools"]
     if isinstance(tools, str):
         if tools != "all":
@@ -139,7 +151,7 @@ class Host:
     def __init__(self, answers):
         self.a = answers
         self.base = [answers["host_app"], "--data-dir", answers["host_data_dir"]]
-        self.w = answers["workspace_id"]
+        self.w = None
         self.digest = None
 
     def shown(self, args):
@@ -217,7 +229,7 @@ def describe_read(args):
     return " ".join(args[:2])
 
 def resolve_workspace(host, a):
-    wanted = a["workspace_id"]
+    wanted = a["workspace"]
     rows = host.read("workspace", ["workspace", "list"])
     if not isinstance(rows, list):
         raise Stop("workspace workspace list returned no list")
@@ -230,8 +242,8 @@ def resolve_workspace(host, a):
         raise Stop(f"workspace {wanted!r} matches no Workspace on this Host; list them with: tm workspace list (after: source ~/.config/teamarness-headless/helpers.sh)", 2)
     if len(matches) > 1:
         ids = ", ".join(r["id"] for r in matches)
-        raise Stop(f"workspace {wanted!r} matches more than one Workspace ({ids}); set workspace_id to one of these IDs", 2)
-    host.w = a["workspace_id"] = matches[0]["id"]
+        raise Stop(f"workspace {wanted!r} matches more than one Workspace ({ids}); set workspace to one of these IDs", 2)
+    host.w = matches[0]["id"]
     print(f"workspace: {matches[0].get('name')} {host.w}", flush=True)
 
 def step_package(host, a):
@@ -412,7 +424,7 @@ def apply(path):
         connected = step_connection(host, a)
         step_tools(host, a)
         if connected:
-            step_check(cli, a["workspace_id"])
+            step_check(cli, host.w)
         code = 0
     except Stop as s:
         report("stopped", s.line)

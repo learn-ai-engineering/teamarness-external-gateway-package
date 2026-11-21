@@ -62,13 +62,15 @@ again at any time. It needs `python3` 3.11 or later and no secret.
    rsync -a ~/src/external-gateway-package/dist/external-gateway-setup target:.local/lib/teamarness-packages/external-gateway-setup
    ```
 
-3. Write the answers template, then fill it in. Set `workspace_id` to the
+3. Write the answers template, then fill it in. Set `workspace` to the
    Workspace name as shown in the desktop app, or its ID. Both are on the
    `workspace:` line of Host setup. To list every Workspace on the Host, source
    the helpers (`source ~/.config/teamarness-headless/helpers.sh`) and run
    `tm workspace list`. Setup looks the value up in that list. It stops with
    exit 2 when no Workspace matches, or when a name matches more than one, and
-   lists the candidate IDs; set `workspace_id` to one of them. Set
+   lists the candidate IDs; set `workspace` to one of them. An older
+   answers file that sets `workspace_id` (an ID only) still works; set one of
+   the two keys, not both. Set
    `accept_native_code_risks = true` to accept the native-code risks that the
    template describes. Choose `tools`:
 
@@ -87,7 +89,7 @@ again at any time. It needs `python3` 3.11 or later and no secret.
    http://127.0.0.1:<port>`. A second run with the same file reports only
    `unchanged:` lines.
 
-For another Workspace, copy the answers file, change `workspace_id`, and apply
+For another Workspace, copy the answers file, change `workspace`, and apply
 it. The Package and `tmx` are already installed, so only that Workspace's
 listener, connection and tools change.
 
