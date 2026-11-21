@@ -1,0 +1,338 @@
+# Install External Gateway on a headless Linux Host
+
+Use this guide to build External Gateway, install it on a headless Teamarness
+Installation, and set it up in each Workspace. When you finish, external agents
+on the same machine can call Workspace tools through `~/.local/bin/tmx`.
+
+[Headless onboarding](headless-onboarding.md) explains each setup request,
+including verify, rotate, disconnect, repair, and the error codes. This guide
+gives the working command sequence.
+
+> [!NOTE]
+> This sequence was verified on Ubuntu 26.04 x86_64 on 2026-11-21, with
+> External Gateway 1.1.0 in two Workspaces. Other x86_64 Linux distributions
+> with systemd and glibc are expected to work but are not verified.
+
+## Prerequisite: a running headless Host
+
+You need a running headless Teamarness Host on the target machine that has
+joined at least one Workspace. Complete the Host guide, "Install headless
+Teamarness on Linux" (`docs/headless/install-linux.md` in the Teamarness
+repository), through step 5, "Join the Workspace", first. This guide uses the
+`tm` and `tm_req` helpers from its step 3, "Define the shell helpers".
+
+Run the Host, the Gateway, `tmx`, and every external agent that uses `tmx`
+under the same unprivileged OS account. The Gateway resolves that account's
+home directory with `getent passwd "$(id -u)"` and never reads `HOME`.
+
+Each command below runs on the target machine, unless the step says that it
+runs on the build machine.
+
+## Machine tier
+
+Do these steps once per machine.
+
+### 1. Get the Package
+
+Release archives do not exist yet. Until they do, build the Package on a
+native Linux x86_64 build machine. The build machine can be the target
+machine. It needs rustup, Node.js and npm, git, a C toolchain, and binutils
+(`strip`, which a test needs).
+
+On the build machine, from a clean checkout of this repository:
+
+```sh
+npm ci
+npm run build
+```
+
+`npm run build` builds only for the native target, `x86_64-unknown-linux-gnu`,
+validates the result, and runs a smoke launch of the Backend. The output is the
+complete Package Directory `dist/dev.teamarness.external-gateway/`. If several
+builds share the build machine, run each under one lock, for example
+`flock ~/src/.heavy-build.lock npm run build`.
+
+> [!NOTE]
+> Update this step when release archives exist. The step then becomes
+> "download and unpack the archive".
+
+### 2. Copy the Package Directory
+
+The Gateway checks every directory above its own executable. Each directory
+from `/` down to the Package Directory must be owned by you or by `root`, must
+not be group- or other-writable, and must not be a symbolic link. Ubuntu's
+default `0002` umask makes `mkdir -p` create group-writable directories. The
+Host guide's step 1 already fixes `~`, `~/.local` and `~/.local/lib`. Create the
+Package directory under `umask 077`, and run the check again:
+
+```sh
+umask 077
+mkdir -p ~/.local/lib/teamarness-packages
+chmod go-w ~ ~/.local ~/.local/lib
+```
+
+Copy the complete directory from the build machine. Do not use a symbolic
+link, and do not edit any file after the copy. The Host checks the declared
+sizes, digests, and modes.
+
+```sh
+rsync -a --delete ~/src/external-gateway-package/dist/dev.teamarness.external-gateway/ target:.local/lib/teamarness-packages/dev.teamarness.external-gateway/
+```
+
+If the build machine is the target, use `cp -a` into
+`~/.local/lib/teamarness-packages/` instead.
+
+### 3. Inspect and install the Package
+
+Inspection does not run the Backend:
+
+```sh
+GW_DIR="$HOME/.local/lib/teamarness-packages/dev.teamarness.external-gateway"
+tm packages inspect --directory "$GW_DIR"
+```
+
+The Gateway needs all three native-code consents. It writes `~/.local/bin/tmx`
+and its private client store under your home directory (filesystem). It listens
+on a `127.0.0.1` port (network). It runs `getent` (process). Install it with
+that consent:
+
+```sh
+printf '%s\n' '{"acceptedRisks":["filesystem","network","process"]}' |
+  tm packages install --directory "$GW_DIR" --package dev.teamarness.external-gateway --input -
+```
+
+The install returns `"kind":"personal_installed"`. One installation serves
+every Workspace that the Installation joins. Install one External Gateway per
+Installation.
+
+## Workspace tier
+
+Repeat these steps for each Workspace, after the Host guide's step 5 has
+joined it. Set `W` to the Workspace ID from `tm workspace list`, for example
+`W=aad43be122caa818738f763c373ba820`. Always select Workspaces by ID.
+
+`tmx` is installed once for your OS user. The listener and its port, the tool
+selection, and the connection and its credential belong to each Workspace.
+None of them carries over from another Workspace.
+
+### 4. Define the Gateway helpers
+
+Paste these helpers into the shell after the Host's `tm` and `tm_req` helpers.
+`gw` sends one Gateway request with its JSON body on stdin. `gw_plan` previews
+and applies one setup intent, then waits until the operation finishes:
+
+```sh
+GW=dev.teamarness.external-gateway
+gw() { tm_req "$W" "$GW" "external-gateway.$1"; }
+gw_plan() {
+  local plan phase
+  plan=$(printf '{"intent":"%s"}\n' "$1" | gw setup.preview |
+    python3 -I -c 'import json,sys; print(json.load(sys.stdin)["planId"])') || return
+  printf '{"planId":"%s"}\n' "$plan" | gw setup.apply || return
+  for _ in $(seq 60); do
+    phase=$(echo '{}' | gw setup.status |
+      python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d["phase"]); print(json.dumps(d), file=sys.stderr)') || return
+    case "$phase" in accepted|prepared|outputs|committed) sleep 2 ;; *) echo "phase: $phase"; return ;; esac
+  done
+  echo "setup still running; check setup.status before you do anything else" >&2
+  return 1
+}
+```
+
+Each setup apply is a mutation. If a helper fails partway, run
+`echo '{}' | gw setup.inspect` and decide from its output. Do not run the
+helper again automatically.
+
+### 5. Inspect the setup
+
+```sh
+echo '{}' | gw setup.inspect
+```
+
+`cli.issue` must be `null`. If it is `external_gateway.output_unsafe`, fix the
+directory modes as described in step 2 and inspect again. In the first
+Workspace, `cli.state` is `missing`. In later Workspaces, it is `installed`.
+
+### 6. Install `tmx` (first Workspace only)
+
+Skip this step when `cli.state` is `installed`:
+
+```sh
+gw_plan install-cli
+```
+
+Expect `phase: complete`, with `command` `installed`. This step installs
+`~/.local/bin/tmx`. It creates no credential and does not start the listener.
+
+### 7. Start the listener
+
+```sh
+echo '{"enabled":true}' | gw listener.set
+echo '{}' | gw status.get
+```
+
+`status.get` reports `running` `true` and this Workspace's port. The listener
+binds only to `127.0.0.1`. The operating system assigns the port the first
+time the listener starts, and the Gateway reuses that port afterwards.
+
+### 8. Connect this Workspace
+
+```sh
+gw_plan connect
+```
+
+Expect `phase: complete`, with `access` `configured`. Connect creates the
+Workspace's managed credential and stores it in the private client store under
+`~/.local/share/teamarness/external-gateway/`. No response contains the
+credential, and you supply no secret. Do not copy the credential from the
+store.
+
+### 9. Select Providers and tools
+
+Nothing is selected by default, and selection never carries over from another
+Workspace. Until you select a tool, every `tmx call` fails with
+`external_gateway.forbidden`.
+
+List the contracts first:
+
+```sh
+echo '{}' | gw catalog.page
+```
+
+Follow every `nextCursor` with `{"cursor":"<nextCursor>"}` until it is `null`.
+`gw_select` enables one contract and selects each of its eligible tools that
+is not already selected. It reads the Provider from the first contracts page
+and follows `nextOffset` tool pages. Check `status.get` afterwards, because a
+failed `tool.set` stops that contract's selection:
+
+```sh
+gw_select() {
+  local contract=$1 provider offset=null body page
+  provider=$(echo '{}' | gw catalog.page |
+    python3 -I -c 'import json,sys
+for r in json.load(sys.stdin)["contracts"]:
+    if r["contract"]==sys.argv[1]: print(r["provider"])' "$contract") || return
+  [ -n "$provider" ] || { echo "contract not listed: $contract" >&2; return 1; }
+  printf '{"provider":"%s","enabled":true,"contracts":[{"contract":"%s","major":1}]}\n' "$provider" "$contract" |
+    gw package.set || return
+  while :; do
+    if [ "$offset" = null ]; then body=$(printf '{"contract":"%s"}' "$contract")
+    else body=$(printf '{"contract":"%s","offset":%s}' "$contract" "$offset"); fi
+    page=$(printf '%s\n' "$body" | gw catalog.page) || return
+    printf '%s' "$page" | python3 -I -c 'import json,sys
+c,p=sys.argv[1],sys.argv[2]
+for t in json.load(sys.stdin)["tools"]:
+    if t["eligible"] and not t["selected"]:
+        print(json.dumps({"contract":c,"major":1,"provider":p,"port":t["port"],"fingerprint":t["fingerprint"],"enabled":True}))' "$contract" "$provider" |
+      while read -r tool; do printf '%s\n' "$tool" | gw tool.set || break; done
+    offset=$(printf '%s' "$page" | python3 -I -c 'import json,sys; o=json.load(sys.stdin)["nextOffset"]; print("null" if o is None else o)')
+    [ "$offset" = null ] && break
+  done
+}
+for c in dev.teamarness.conversations dev.teamarness.documents dev.teamarness.backlog; do gw_select "$c"; done
+echo '{}' | gw status.get
+```
+
+Select only the contracts that the external agent needs. `runtime.guide` tools
+are not eligible, and the helper skips them. To select single tools instead,
+send `package.set` once, then one `tool.set` per tool, as shown in
+[headless onboarding](headless-onboarding.md#4-select-the-tools-to-expose).
+`status.get` reports `selectedContracts` and `selectedTools` for this
+Workspace.
+
+### 10. Test with `tmx`
+
+Run these as the same OS user:
+
+```sh
+~/.local/bin/tmx workspaces
+~/.local/bin/tmx --workspace "$W" status
+~/.local/bin/tmx --workspace "$W" call dev.teamarness.conversations channel.list --major 1 --json '{}'
+```
+
+`workspaces` lists each connected Workspace with its own port. `status`
+reports `reachable` `true` for this Workspace. The call returns the Workspace's
+visible Channels.
+
+### Hand over to external agents
+
+Give each external agent the exact command `~/.local/bin/tmx`, the Workspace
+ID, and the skill from `~/.local/bin/tmx --skill`. To install the skill into an
+agent's skill folder, see
+[Install the skill manually](headless-onboarding.md#install-the-skill-manually).
+There is no folder chooser on Linux.
+
+Tell agents to pass the Workspace ID, not the name, to `--workspace`. Record
+IDs can repeat across Workspaces. For example, `#general` has the same ID in
+every Workspace, so a call with the wrong `--workspace` succeeds in the wrong
+Workspace without an error. Calls through the Gateway act as this
+Installation's Workspace Person.
+
+## Update the Package
+
+Build the new version, copy it over the same directory, and reload it:
+
+```sh
+rsync -a --delete ~/src/external-gateway-package/dist/dev.teamarness.external-gateway/ target:.local/lib/teamarness-packages/dev.teamarness.external-gateway/
+tm packages reload --package dev.teamarness.external-gateway
+```
+
+Reload applies to every Workspace. Each Workspace keeps its listener port,
+tool selection, and connection. `tm_req` looks up the new contract digest for
+you. After a reload, inspect each Workspace with `echo '{}' | gw setup.inspect`.
+If `cli.change` is `update`, run `gw_plan install-cli` once to update `tmx`.
+
+## Check the Gateway
+
+| Check | Command |
+|---|---|
+| Setup state | `echo '{}' \| gw setup.inspect` |
+| Listener and selection | `echo '{}' \| gw status.get` |
+| Last setup operation | `echo '{}' \| gw setup.status` |
+| Client view | `~/.local/bin/tmx --workspace "$W" status` |
+
+For each error code and its fix, see
+[Common errors](headless-onboarding.md#common-errors). If a request reports
+`outcomeUncertain: true`, inspect the state before you do anything else. Do not
+repeat the request automatically.
+
+## Planned: answers-file setup
+
+> [!NOTE]
+> Planned, not implemented. Steps 4 to 10 become one command. The names below
+> are a sketch and can change.
+
+A later release replaces the per-Workspace helpers with an answers file:
+
+1. `setup --print-template` writes a commented answers file.
+2. You fill it in.
+3. `setup --answers <file>` applies it and reports what it did. A second run
+   with the same file changes nothing.
+
+The template has no secret fields, because connect creates the credential. It
+holds these inputs:
+
+```text
+# Workspace to configure, by ID (required).
+workspace: aad43be122caa818738f763c373ba820
+
+# Start the loopback listener (default: true). Connect needs it.
+listener: true
+
+# Connect this Workspace and create its managed credential (default: true).
+connect: true
+
+# Tools to expose. "all" selects every eligible tool of every listed contract.
+# Otherwise, list contracts, each with "all" or with named ports.
+tools:
+  dev.teamarness.conversations: all
+  dev.teamarness.documents: all
+  dev.teamarness.backlog:
+    - ticket.list
+    - ticket.get
+```
+
+The command would install or update `tmx` when needed. It would not install a
+skill, choose a port, or add a tool that the file does not name. It would
+refuse, and change nothing, when a listed contract or port does not exist or
+when a tool's fingerprint needs review.

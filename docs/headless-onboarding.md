@@ -5,6 +5,10 @@ node without the desktop Configuration page, for example a Linux server. On the
 desktop, the Configuration page performs the same steps in the same order. On a
 headless node, you send each Package request yourself.
 
+For the complete Linux sequence, from building the Package to testing `tmx`
+in each Workspace, see [Install External Gateway on a headless Linux Host](headless-install.md).
+This guide explains each request in that sequence.
+
 The sequence below is tested by `backend/tests/headless_onboarding.rs`. That
 test runs the real Backend in the SDK test harness with a private test home, a
 scripted Provider and an installed fixture copy of `tmx`. It is not evidence of
