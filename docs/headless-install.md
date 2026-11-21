@@ -19,8 +19,8 @@ request, including verify, rotate, disconnect, repair, and the error codes.
 You need a running headless Teamarness Host on the target machine that has
 joined at least one Workspace. Complete the Host guide, "Install headless
 Teamarness on Linux" (`docs/headless/install-linux.md` in the Teamarness
-repository), through "Run setup", with a Workspace Invitation, first. The
-Workspace ID is on the `workspace:` line that Host setup prints.
+repository), through "Run setup", with a Workspace Invitation, first. Host setup
+prints the Workspace name and ID on its `workspace:` line.
 
 The setup command below needs no helpers. The manual steps use the Host's `tm`
 and `tm_req` helpers. Load them in each shell first:
@@ -63,8 +63,12 @@ again at any time. It needs `python3` 3.11 or later and no secret.
    ```
 
 3. Write the answers template, then fill it in. Set `workspace_id` to the
-   Workspace ID from the `workspace:` line of Host setup, or from
-   `tm workspace list`. Set
+   Workspace name as shown in the desktop app, or its ID. Both are on the
+   `workspace:` line of Host setup. To list every Workspace on the Host, source
+   the helpers (`source ~/.config/teamarness-headless/helpers.sh`) and run
+   `tm workspace list`. Setup looks the value up in that list. It stops with
+   exit 2 when no Workspace matches, or when a name matches more than one, and
+   lists the candidate IDs; set `workspace_id` to one of them. Set
    `accept_native_code_risks = true` to accept the native-code risks that the
    template describes. Choose `tools`:
 
@@ -78,8 +82,8 @@ again at any time. It needs `python3` 3.11 or later and no secret.
    ~/.local/lib/teamarness-packages/external-gateway-setup --answers ~/gateway-answers.toml
    ```
 
-   Each step prints one line, `unchanged:`, `changed:` or `stopped:`, followed by
-   a summary. A successful first run ends with `check tmx reaches
+   Setup first prints `workspace: <name> <id>`. Each step then prints one line,
+   `unchanged:`, `changed:` or `stopped:`, followed by a summary. A successful first run ends with `check tmx reaches
    http://127.0.0.1:<port>`. A second run with the same file reports only
    `unchanged:` lines.
 
@@ -87,7 +91,7 @@ For another Workspace, copy the answers file, change `workspace_id`, and apply
 it. The Package and `tmx` are already installed, so only that Workspace's
 listener, connection and tools change.
 
-Exit status 0 means done, 1 means stopped, and 2 means the answers file or the
+Exit status 0 means done, 1 means stopped, and 2 means the answers file names no single Workspace, or the file or the
 invocation is invalid. Setup checks the file before it sends any request. It
 finds an unknown contract or port only when it reads the catalog, which can be
 after it has enabled that contract; the output lists every change it made. When a line says `outcome unknown`, run
@@ -181,7 +185,7 @@ Installation.
 
 ## Workspace tier
 
-Repeat these steps for each Workspace, after Host setup has joined it. Set `W` to the Workspace ID from `tm workspace list`, for example
+Repeat these steps for each Workspace, after Host setup has joined it. Set `W` to the Workspace ID from `tm workspace list` (with the helpers sourced, as in the prerequisite), for example
 `W=aad43be122caa818738f763c373ba820`. Always select Workspaces by ID.
 
 `tmx` is installed once for your OS user. The listener and its port, the tool

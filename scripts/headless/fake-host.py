@@ -51,6 +51,9 @@ def main(argv):
     assert argv[0] == "--data-dir", argv
     s = load()
     args = argv[2:]
+    if args[:2] == ["workspace", "list"]:
+        rows = s.get("workspaces", [{"id": s["workspace"], "name": "Headless"}])
+        out([dict(r, createdBy="0" * 64, createdAtUnixMs=0) for r in rows])
     if args[:2] == ["packages", "list"]:
         regs = [{"directory": s["registered"], "expectedIdentity": IDENTITY, "override": False,
                  "status": {"kind": "admitted"}, "tier": "personal"}] if s.get("registered") else []

@@ -86,7 +86,7 @@ test("prints a template that parses with every key, and refuses to overwrite", (
 
 for (const [name, extra, message] of [
   ["an unknown key", "colour = true", /unknown key/],
-  ["a bad workspace_id", 'workspace_id = "headless"', /workspace_id/],
+  ["an empty workspace_id", 'workspace_id = " "', /workspace_id must be a Workspace name or its 32-character ID/],
   ["a wrong type", 'listener = "yes"', /listener has the wrong type/],
   ["connect without listener", "listener = false", /connect = true needs listener = true/],
   ["a bad tools value", 'tools = "some"', /tools must be/],
@@ -218,4 +218,34 @@ test("an unknown contract or port is invalid input", () => {
   const port = run(f, ["--answers", answers(f, '[tools]\n"dev.teamarness.backlog" = ["ticket.nope"]')]);
   assert.equal(port.status, 2);
   assert.match(port.stdout, /^stopped: tools dev\.teamarness\.backlog has no eligible port\(s\): ticket\.nope/m);
+});
+
+test("a Workspace name resolves to its ID through the Host's Workspace list", () => {
+  const f = fixture({ workspaces: [{ id: "b".repeat(32), name: "Other" }, { id: W, name: "Headless" }] });
+  const out = run(f, ["--answers", answers(f, 'workspace_id = "Headless"')]);
+  assert.equal(out.status, 0, out.stdout + out.stderr);
+  assert.match(out.stdout, new RegExp(`^workspace: Headless ${W}$`, "m"));
+  assert.match(out.stdout, /^summary: 7 changed, 1 unchanged, 0 stopped$/m);
+});
+
+test("an ID is checked against the Host's Workspace list", () => {
+  const f = fixture();
+  const out = run(f, ["--answers", answers(f)]);
+  assert.equal(out.status, 0, out.stdout + out.stderr);
+  assert.match(out.stdout, new RegExp(`^workspace: Headless ${W}$`, "m"));
+  const missing = run(f, ["--answers", answers(f, `workspace_id = "${"c".repeat(32)}"`)]);
+  assert.equal(missing.status, 2);
+  assert.match(missing.stdout, /^stopped: workspace 'c{32}' matches no Workspace on this Host; list them with: tm workspace list/m);
+});
+
+test("a name that matches no Workspace, or more than one, stops with exit 2 before any change", () => {
+  const f = fixture({ workspaces: [{ id: W, name: "Team" }, { id: "b".repeat(32), name: "Team" }, { id: "e".repeat(32), name: "Solo" }] });
+  const none = run(f, ["--answers", answers(f, 'workspace_id = "Nope"')]);
+  assert.equal(none.status, 2);
+  assert.match(none.stdout, /^stopped: workspace 'Nope' matches no Workspace on this Host/m);
+  assert.deepEqual(none.state.log, []);
+  const two = run(f, ["--answers", answers(f, 'workspace_id = "Team"')]);
+  assert.equal(two.status, 2);
+  assert.match(two.stdout, new RegExp(`^stopped: workspace 'Team' matches more than one Workspace \\(${W}, ${"b".repeat(32)}\\); set workspace_id to one of these IDs$`, "m"));
+  assert.deepEqual(two.state.log, []);
 });

@@ -49,7 +49,8 @@ package_dir = "~/.local/lib/teamarness-packages/dev.teamarness.external-gateway"
 # Set to true to accept. Required only when the Package is not yet installed.
 accept_native_code_risks = false
 
-# Workspace to configure, by its 32-character ID from "workspace list". Names are not accepted.
+# Workspace to configure: its name as shown in the desktop app, or its 32-character ID.
+# Setup looks it up in the Host's Workspace list and stops if no Workspace or more than one matches.
 workspace_id = ""
 
 # Start the loopback listener. Connect needs it.
@@ -108,8 +109,8 @@ def load_answers(path):
     for key, kind in KEYS.items():
         if not isinstance(data[key], kind):
             invalid(f"{key} has the wrong type")
-    if not re.fullmatch(r"[0-9a-f]{32}", data["workspace_id"]):
-        invalid("workspace_id must be the 32-character lowercase hexadecimal Workspace ID")
+    if not data["workspace_id"].strip():
+        invalid("workspace_id must be a Workspace name or its 32-character ID")
     tools = data["tools"]
     if isinstance(tools, str):
         if tools != "all":
@@ -154,7 +155,7 @@ class Host:
             out = json.loads(p.stdout) if p.stdout.strip() else None
         except ValueError:
             out = None
-        if p.returncode == 0 and isinstance(out, dict):
+        if p.returncode == 0 and isinstance(out, (dict, list)):
             return out, None
         err = out if isinstance(out, dict) else {}
         if isinstance(err.get("error"), dict):
@@ -214,6 +215,24 @@ def describe_read(args):
     if args[:2] == ["package", "request"]:
         return args[args.index("--operation") + 1]
     return " ".join(args[:2])
+
+def resolve_workspace(host, a):
+    wanted = a["workspace_id"]
+    rows = host.read("workspace", ["workspace", "list"])
+    if not isinstance(rows, list):
+        raise Stop("workspace workspace list returned no list")
+    rows = [r for r in rows if isinstance(r, dict) and isinstance(r.get("id"), str)]
+    if re.fullmatch(r"[0-9a-f]{32}", wanted):
+        matches = [r for r in rows if r["id"] == wanted]
+    else:
+        matches = [r for r in rows if r.get("name") == wanted]
+    if not matches:
+        raise Stop(f"workspace {wanted!r} matches no Workspace on this Host; list them with: tm workspace list (after: source ~/.config/teamarness-headless/helpers.sh)", 2)
+    if len(matches) > 1:
+        ids = ", ".join(r["id"] for r in matches)
+        raise Stop(f"workspace {wanted!r} matches more than one Workspace ({ids}); set workspace_id to one of these IDs", 2)
+    host.w = a["workspace_id"] = matches[0]["id"]
+    print(f"workspace: {matches[0].get('name')} {host.w}", flush=True)
 
 def step_package(host, a):
     listing = host.read("package", ["packages", "list"])
@@ -386,6 +405,7 @@ def apply(path):
     a = load_answers(path)
     host = Host(a)
     try:
+        resolve_workspace(host, a)
         step_package(host, a)
         cli = step_cli(host)
         step_listener(host, a)
