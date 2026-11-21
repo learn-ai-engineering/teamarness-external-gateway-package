@@ -1,0 +1,435 @@
+#!/usr/bin/env bash
+# External Gateway headless setup: print an answers template, or apply an answers file.
+#
+#   external-gateway-setup --print-template [<path>]
+#   external-gateway-setup --answers <file>
+#   external-gateway-setup --help
+#
+# It drives the existing Host operator commands and Gateway Package requests. It reads the
+# current state first and changes only what differs. It never retries a change, and it stops
+# on an uncertain outcome. Exit codes: 0 ok, 1 operational failure or uncertain outcome,
+# 2 invalid invocation or answers.
+set -euo pipefail
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "external-gateway-setup: python3 3.11 or later is required" >&2
+  exit 2
+fi
+
+exec python3 -I - "$@" <<'PY'
+import json, os, re, subprocess, sys, time
+
+if sys.version_info < (3, 11):
+    print("external-gateway-setup: python3 3.11 or later is required", file=sys.stderr)
+    sys.exit(2)
+
+IDENTITY = "dev.teamarness.external-gateway"
+PREFIX = "external-gateway."
+RUNNING_PHASES = {"accepted", "prepared", "outputs", "committed"}
+POLL_SECONDS = 120
+CALL_TIMEOUT = 150
+ERRORS_DOC = "docs/headless-onboarding.md#common-errors"
+
+TEMPLATE = '''# External Gateway headless setup answers.
+# Apply with: external-gateway-setup --answers <this file>
+# Running it again with the same answers changes nothing. "~" expands to your home directory.
+
+# Host location.
+host_app = "~/.local/lib/teamarness-headless/teamarness-headless"
+host_data_dir = "~/.local/share/teamarness-headless"
+
+# Package Directory to register. Copy dist/dev.teamarness.external-gateway/ here first.
+# No symbolic links, and no parent directory may be group- or other-writable.
+package_dir = "~/.local/lib/teamarness-packages/dev.teamarness.external-gateway"
+
+# Installing the Package accepts native-code risks. It runs with your account's authority:
+#   filesystem: writes ~/.local/bin/tmx and a private client store under ~/.local/share
+#   network:    listens on a 127.0.0.1 port
+#   process:    runs getent to find your home directory
+# Set to true to accept. Required only when the Package is not yet installed.
+accept_native_code_risks = false
+
+# Workspace to configure, by its 32-character ID from "workspace list". Names are not accepted.
+workspace_id = ""
+
+# Start the loopback listener. Connect needs it.
+listener = true
+
+# Connect this Workspace and create its managed credential. No secret is needed.
+# false skips connecting; setup never disconnects, repairs or rotates.
+connect = true
+
+# Tools to expose to external agents through tmx. Selection only adds tools; tools you do not
+# list stay as they are.
+#   tools = "all"   every eligible tool of every available contract
+# or, instead, a table (delete the line above):
+#   [tools]
+#   "dev.teamarness.conversations" = "all"
+#   "dev.teamarness.backlog" = ["ticket.list", "ticket.get"]
+tools = "all"
+'''
+
+KEYS = {
+    "host_app": str, "host_data_dir": str, "package_dir": str,
+    "accept_native_code_risks": bool, "workspace_id": str,
+    "listener": bool, "connect": bool, "tools": (str, dict),
+}
+
+class Stop(Exception):
+    def __init__(self, line, code=1):
+        super().__init__(line)
+        self.line, self.code = line, code
+
+counts = {"changed": 0, "unchanged": 0, "stopped": 0}
+
+def report(kind, text):
+    counts[kind] += 1
+    print(f"{kind}: {text}", flush=True)
+
+def invalid(message):
+    print(f"external-gateway-setup: {message}", file=sys.stderr)
+    sys.exit(2)
+
+def load_answers(path):
+    import tomllib
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except FileNotFoundError:
+        invalid(f"answers file not found: {path}")
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
+        invalid(f"answers file is not valid TOML: {e}")
+    unknown = sorted(set(data) - set(KEYS))
+    if unknown:
+        invalid("unknown key(s): " + ", ".join(unknown))
+    missing = sorted(set(KEYS) - set(data))
+    if missing:
+        invalid("missing key(s): " + ", ".join(missing))
+    for key, kind in KEYS.items():
+        if not isinstance(data[key], kind):
+            invalid(f"{key} has the wrong type")
+    if not re.fullmatch(r"[0-9a-f]{32}", data["workspace_id"]):
+        invalid("workspace_id must be the 32-character lowercase hexadecimal Workspace ID")
+    tools = data["tools"]
+    if isinstance(tools, str):
+        if tools != "all":
+            invalid('tools must be "all" or a table of contracts')
+    else:
+        if not tools:
+            invalid("tools table is empty")
+        for contract, ports in tools.items():
+            if ports == "all":
+                continue
+            if (not isinstance(ports, list) or not ports
+                    or not all(isinstance(p, str) and p for p in ports)):
+                invalid(f'tools."{contract}" must be "all" or a non-empty list of port names')
+    if data["connect"] and not data["listener"]:
+        invalid("connect = true needs listener = true")
+    for key in ("host_app", "host_data_dir", "package_dir"):
+        value = os.path.expanduser(data[key])
+        if not os.path.isabs(value):
+            invalid(f"{key} must be an absolute path or start with ~/")
+        data[key] = value
+    if not (os.path.isfile(data["host_app"]) and os.access(data["host_app"], os.X_OK)):
+        invalid(f"host_app is not an executable file: {data['host_app']}")
+    return data
+
+class Host:
+    def __init__(self, answers):
+        self.a = answers
+        self.base = [answers["host_app"], "--data-dir", answers["host_data_dir"]]
+        self.w = answers["workspace_id"]
+        self.digest = None
+
+    def shown(self, args):
+        return " ".join(["<host_app>", "--data-dir", "<host_data_dir>", *args])
+
+    def run(self, args, body=None):
+        try:
+            p = subprocess.run(self.base + args, input=None if body is None else json.dumps(body),
+                               capture_output=True, text=True, timeout=CALL_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return None, {"code": "timeout"}
+        try:
+            out = json.loads(p.stdout) if p.stdout.strip() else None
+        except ValueError:
+            out = None
+        if p.returncode == 0 and isinstance(out, dict):
+            return out, None
+        err = out if isinstance(out, dict) else {}
+        if isinstance(err.get("error"), dict):
+            err = err["error"]
+        code = err.get("code")
+        if not isinstance(code, str):
+            words = p.stderr.split()
+            code = words[0] if words else f"exit {p.returncode}"
+        return None, {"code": code, "inner": inner_code(err), "uncertain": err.get("outcomeUncertain")}
+
+    def read(self, step, args, body=None):
+        out, err = self.run(args, body)
+        if err:
+            raise Stop(f"{step} {describe_read(args)} failed ({fmt(err)})")
+        return out
+
+    def mutate(self, step, args, body, inspect):
+        out, err = self.run(args, body)
+        if err:
+            raise Stop(f"{step} outcome unknown ({fmt(err)}) — inspect with: {inspect}, then rerun setup")
+        return out
+
+    def request_args(self, operation):
+        if self.digest is None:
+            ops = self.read("request", ["package", "operations", "--workspace", self.w, "--package", IDENTITY])
+            self.digest = ops.get("contractDigest")
+            if not isinstance(self.digest, str):
+                raise Stop("request package operations returned no contract digest")
+        digest = self.digest
+        return ["package", "request", "--workspace", self.w, "--package", IDENTITY,
+                "--operation", PREFIX + operation, "--contract-digest", digest, "--input", "-"]
+
+    def inspect_cmd(self, operation):
+        return f"echo '{{}}' | " + self.shown(["package", "request", "--workspace", self.w, "--package",
+                                              IDENTITY, "--operation", PREFIX + operation,
+                                              "--contract-digest", "<digest>", "--input", "-"])
+
+    def get(self, step, operation, body=None):
+        return self.read(step, self.request_args(operation), {} if body is None else body)
+
+    def change(self, step, operation, body, inspect_op):
+        return self.mutate(step, self.request_args(operation), body, self.inspect_cmd(inspect_op))
+
+def inner_code(err):
+    details = err.get("details")
+    if isinstance(details, dict):
+        for candidate in (details.get("code"), (details.get("error") or {}).get("code") if isinstance(details.get("error"), dict) else None,
+                          (details.get("provider") or {}).get("code") if isinstance(details.get("provider"), dict) else None):
+            if isinstance(candidate, str):
+                return candidate
+    return None
+
+def fmt(err):
+    return err["code"] + (f": {err['inner']}" if err.get("inner") and err["inner"] != err["code"] else "")
+
+def describe_read(args):
+    if args[:2] == ["package", "request"]:
+        return args[args.index("--operation") + 1]
+    return " ".join(args[:2])
+
+def step_package(host, a):
+    listing = host.read("package", ["packages", "list"])
+    regs = [r for r in listing.get("registrations", []) if r.get("expectedIdentity") == IDENTITY]
+    wanted = os.path.realpath(a["package_dir"])
+    if regs:
+        current = regs[0].get("directory", "")
+        if os.path.realpath(current) == wanted:
+            report("unchanged", f"package registered from {current}")
+            return
+        raise Stop(f"package registered from a different directory ({current}); remove or update it by hand")
+    if not os.path.isdir(a["package_dir"]):
+        raise Stop(f"package directory not found: {a['package_dir']}")
+    if not a["accept_native_code_risks"]:
+        print("external-gateway-setup: the Package is not installed; set accept_native_code_risks = true to install it", file=sys.stderr)
+        sys.exit(2)
+    host.read("package", ["packages", "inspect", "--directory", a["package_dir"]])
+    host.mutate("package", ["packages", "install", "--directory", a["package_dir"], "--package", IDENTITY, "--input", "-"],
+                {"acceptedRisks": ["filesystem", "network", "process"]}, host.shown(["packages", "list"]))
+    report("changed", f"package installed from {a['package_dir']}")
+    deadline = time.monotonic() + 60
+    while True:
+        out, err = host.run(["package", "operations", "--workspace", host.w, "--package", IDENTITY])
+        if out is not None:
+            return
+        if time.monotonic() > deadline:
+            raise Stop(f"package installed but not active in Workspace {host.w} ({fmt(err)}); check: {host.shown(['packages', 'list'])}")
+        time.sleep(2)
+
+def apply_plan(host, step, intent, expect):
+    plan = host.get(step, "setup.preview", {"intent": intent})
+    plan_id = plan.get("planId")
+    if not isinstance(plan_id, str):
+        raise Stop(f"{step} setup.preview returned no plan")
+    applied = host.change(step, "setup.apply", {"planId": plan_id}, "setup.status")
+    operation = applied.get("operationId")
+    deadline = time.monotonic() + POLL_SECONDS
+    while True:
+        status = host.get(step, "setup.status")
+        phase = status.get("phase")
+        if status.get("operationId") == operation and phase not in RUNNING_PHASES:
+            break
+        if time.monotonic() > deadline:
+            raise Stop(f"{step} still running (phase {phase}) — inspect with: {host.inspect_cmd('setup.status')}, then rerun setup")
+        time.sleep(2)
+    if phase != "complete" or any(status.get(k) != v for k, v in expect.items()):
+        raise Stop(f"{step} {intent} ended in phase {phase}" + (f" ({status['error']})" if status.get("error") else "")
+                   + f"; see {ERRORS_DOC}")
+
+def step_cli(host):
+    view = host.get("cli", "setup.inspect")
+    cli = view["cli"]
+    if cli.get("issue"):
+        raise Stop(f"cli {cli['issue']}; fix it as described in {ERRORS_DOC}, then rerun setup")
+    if cli.get("state") == "installed" and cli.get("change") == "none":
+        report("unchanged", f"cli {cli.get('path')} {cli.get('version')}")
+        return cli
+    if cli.get("state") == "missing" or cli.get("change") in ("install", "update"):
+        apply_plan(host, "cli", "install-cli", {"command": "installed"})
+        cli = host.get("cli", "setup.inspect")["cli"]
+        report("changed", f"cli installed {cli.get('path')} {cli.get('version')}")
+        return cli
+    raise Stop(f"cli state {cli.get('state')} change {cli.get('change')}; see {ERRORS_DOC}")
+
+def step_listener(host, a):
+    status = host.get("listener", "status.get")
+    want = a["listener"]
+    if status.get("desiredEnabled") == want and (not want or status.get("running")):
+        report("unchanged", f"listener {'on, port ' + str(status.get('port')) if want else 'off'}")
+        return
+    host.change("listener", "listener.set", {"enabled": want}, "status.get")
+    status = host.get("listener", "status.get")
+    if want and not status.get("running"):
+        raise Stop(f"listener did not start ({status.get('warning')}); see {ERRORS_DOC}")
+    report("changed", f"listener {'on, port ' + str(status.get('port')) if want else 'off'}")
+
+def step_connection(host, a):
+    conn = host.get("connection", "setup.inspect")["connection"]
+    state = conn.get("state")
+    if state == "connected" and conn.get("authority") == "current":
+        report("unchanged", "connection connected")
+        return True
+    if not a["connect"]:
+        report("unchanged", f"connection {state} (connect not requested)")
+        return False
+    if state == "needs-repair":
+        raise Stop(f"connection needs repair ({conn.get('repair')}); repair it by hand as described in "
+                   "docs/headless-onboarding.md#rotate-disconnect-and-repair, then rerun setup")
+    if state != "not-connected":
+        raise Stop(f"connection state {state} authority {conn.get('authority')}; see {ERRORS_DOC}")
+    apply_plan(host, "connection", "connect", {"access": "configured"})
+    conn = host.get("connection", "setup.inspect")["connection"]
+    if conn.get("state") != "connected":
+        raise Stop(f"connection is {conn.get('state')} after connect; see {ERRORS_DOC}")
+    report("changed", "connection connected")
+    return True
+
+def catalog_contracts(host):
+    rows, cursor = [], None
+    for _ in range(256):
+        page = host.get("tools", "catalog.page", {} if cursor is None else {"cursor": cursor})
+        rows += page.get("contracts", [])
+        cursor = page.get("nextCursor")
+        if cursor is None:
+            return rows
+    raise Stop("tools catalog has too many pages")
+
+def tool_rows(host, contract):
+    rows, offset = [], None
+    while True:
+        body = {"contract": contract} if offset is None else {"contract": contract, "offset": offset}
+        page = host.get("tools", "catalog.page", body)
+        rows += page.get("tools", [])
+        offset = page.get("nextOffset")
+        if offset is None:
+            return rows
+
+def step_tools(host, a):
+    contracts = {r["contract"]: r for r in catalog_contracts(host)}
+    if a["tools"] == "all":
+        wanted = {c: "all" for c, r in contracts.items() if r.get("available")}
+    else:
+        wanted = a["tools"]
+        for c in wanted:
+            if c not in contracts or not contracts[c].get("available"):
+                raise Stop(f"tools contract {c} is not available in this Workspace", 2)
+    for contract, ports in wanted.items():
+        row = contracts[contract]
+        enabled_now = False
+        if not (row.get("selected") and row.get("hostEnabled")):
+            host.change("tools", "package.set", {"provider": row["provider"], "enabled": True,
+                        "contracts": [{"contract": contract, "major": row["major"]}]}, "catalog.page")
+            enabled_now = True
+        tools = {t["port"]: t for t in tool_rows(host, contract)}
+        if ports == "all":
+            chosen = [t for t in tools.values() if t.get("eligible")]
+        else:
+            unknown = [p for p in ports if p not in tools or not tools[p].get("eligible")]
+            if unknown:
+                raise Stop(f"tools {contract} has no eligible port(s): {', '.join(unknown)}", 2)
+            chosen = [tools[p] for p in ports]
+        review = [t["port"] for t in chosen if t.get("reviewRequired")]
+        if review:
+            raise Stop(f"tools {contract} needs review for: {', '.join(review)}; review them in the Gateway settings, then rerun setup")
+        added = 0
+        for t in chosen:
+            if t.get("selected"):
+                continue
+            host.change("tools", "tool.set", {"contract": contract, "major": row["major"], "provider": row["provider"],
+                        "port": t["port"], "fingerprint": t["fingerprint"], "enabled": True}, "catalog.page")
+            added += 1
+        already = len(chosen) - added
+        if added or enabled_now:
+            report("changed", f"tools {contract} +{added} ({already} already selected)")
+        else:
+            report("unchanged", f"tools {contract} ({already} selected)")
+
+def step_check(cli, w):
+    path = cli.get("path")
+    try:
+        p = subprocess.run([path, "--workspace", w, "status"], capture_output=True, text=True, timeout=30)
+        out = json.loads(p.stdout)
+    except Exception:
+        raise Stop(f"check tmx status failed; run: {path} --workspace {w} status")
+    if p.returncode != 0 or out.get("reachable") is not True:
+        raise Stop(f"check tmx status not reachable; run: {path} --workspace {w} status")
+    report("unchanged", f"check tmx reaches {out.get('endpoint')}")
+
+def apply(path):
+    a = load_answers(path)
+    host = Host(a)
+    try:
+        step_package(host, a)
+        cli = step_cli(host)
+        step_listener(host, a)
+        connected = step_connection(host, a)
+        step_tools(host, a)
+        if connected:
+            step_check(cli, a["workspace_id"])
+        code = 0
+    except Stop as s:
+        report("stopped", s.line)
+        code = s.code
+    print(f"summary: {counts['changed']} changed, {counts['unchanged']} unchanged, {counts['stopped']} stopped")
+    sys.exit(code)
+
+def main(argv):
+    if argv in (["--help"], ["-h"]):
+        print(HELP)
+        return 0
+    if argv and argv[0] == "--print-template" and len(argv) <= 2:
+        if len(argv) == 1:
+            sys.stdout.write(TEMPLATE)
+            return 0
+        try:
+            fd = os.open(argv[1], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            invalid(f"refusing to overwrite {argv[1]}")
+        with os.fdopen(fd, "w") as f:
+            f.write(TEMPLATE)
+        print(f"wrote {argv[1]}")
+        return 0
+    if len(argv) == 2 and argv[0] == "--answers":
+        apply(argv[1])
+    invalid("usage: external-gateway-setup --print-template [<path>] | --answers <file> | --help")
+
+HELP = """usage: external-gateway-setup --print-template [<path>]
+       external-gateway-setup --answers <file>
+       external-gateway-setup --help
+
+Sets up External Gateway on a headless Teamarness Host from an answers file.
+
+  --print-template [<path>]  Write a commented answers template to stdout, or to a new file.
+  --answers <file>           Apply the answers. Safe to run again: it changes only what differs.
+
+Exit status: 0 ok, 1 stopped (operational failure or uncertain outcome), 2 invalid input."""
+
+sys.exit(main(sys.argv[1:]))
+PY

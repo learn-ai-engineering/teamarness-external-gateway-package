@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { assemblePackage } from "./assemble-package.mjs";
+import { assemblePackage, shipSetupScript } from "./assemble-package.mjs";
 
 const identity = "dev.teamarness.fixture";
 const zeroDigest = "0".repeat(64);
@@ -199,3 +199,20 @@ for (const { name, fixture, options, code } of refusals) {
     }
   });
 }
+
+test("ships the headless setup script beside the Package Directory, executable, without touching it", async () => {
+  const root = await fixtureRoot();
+  try {
+    await mkdir(join(root, "scripts/headless"), { recursive: true });
+    await writeFile(join(root, "scripts/headless/external-gateway-setup"), "#!/usr/bin/env bash\necho setup\n", { mode: 0o600 });
+    const output = await previousOutput(root);
+    const before = await snapshot(output);
+    const shipped = await shipSetupScript({ projectRoot: root });
+    assert.equal(shipped, join(root, "dist", "external-gateway-setup"));
+    assert.equal((await stat(shipped)).mode & 0o777, 0o755);
+    assert.equal(await readFile(shipped, "utf8"), "#!/usr/bin/env bash\necho setup\n");
+    assert.deepEqual(await snapshot(output), before);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

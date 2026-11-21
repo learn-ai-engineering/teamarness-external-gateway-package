@@ -57,6 +57,17 @@ export async function assemblePackage({ projectRoot = root, env = process.env, t
   return destination;
 }
 
+/**
+ * Copies the headless setup script beside the Package Directory, as `dist/external-gateway-setup`.
+ * It is not part of the Package Directory, so the manifest, digests and admission are unaffected.
+ */
+export async function shipSetupScript({ projectRoot = root } = {}) {
+  const destination = join(projectRoot, "dist", "external-gateway-setup");
+  await writeFile(destination, await readFile(join(projectRoot, "scripts/headless/external-gateway-setup")), { mode: 0o755 });
+  await chmod(destination, 0o755);
+  return destination;
+}
+
 /** Asks Cargo, so `CARGO_TARGET_DIR` and `build.target-dir` are honoured. */
 function cargoTargetDirectory(projectRoot, env) {
   const result = spawnSync("cargo", ["metadata", "--format-version", "1", "--no-deps"], {

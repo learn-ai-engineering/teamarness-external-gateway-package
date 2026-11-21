@@ -4,9 +4,10 @@ Use this guide to build External Gateway, install it on a headless Teamarness
 Installation, and set it up in each Workspace. When you finish, external agents
 on the same machine can call Workspace tools through `~/.local/bin/tmx`.
 
-[Headless onboarding](headless-onboarding.md) explains each setup request,
-including verify, rotate, disconnect, repair, and the error codes. This guide
-gives the working command sequence.
+The primary path is one setup command with an answers file. The manual steps
+after it do the same thing one request at a time, and serve as the fallback and
+reference. [Headless onboarding](headless-onboarding.md) explains each setup
+request, including verify, rotate, disconnect, repair, and the error codes.
 
 > [!NOTE]
 > This sequence was verified on Ubuntu 26.04 x86_64 on 2026-11-21, with
@@ -18,8 +19,9 @@ gives the working command sequence.
 You need a running headless Teamarness Host on the target machine that has
 joined at least one Workspace. Complete the Host guide, "Install headless
 Teamarness on Linux" (`docs/headless/install-linux.md` in the Teamarness
-repository), through step 5, "Join the Workspace", first. This guide uses the
-`tm` and `tm_req` helpers from its step 3, "Define the shell helpers".
+repository), through step 5, "Join the Workspace", first. The manual steps use
+the `tm` and `tm_req` helpers from its step 3, "Define the shell helpers". The
+setup command does not need them.
 
 Run the Host, the Gateway, `tmx`, and every external agent that uses `tmx`
 under the same unprivileged OS account. The Gateway resolves that account's
@@ -27,6 +29,70 @@ home directory with `getent passwd "$(id -u)"` and never reads `HOME`.
 
 Each command below runs on the target machine, unless the step says that it
 runs on the build machine.
+
+## Set up with an answers file
+
+`external-gateway-setup` installs the Package, installs `tmx`, starts the
+listener, connects the Workspace, and selects tools from one answers file. It
+reads the current state first and changes only what differs, so you can run it
+again at any time. It needs `python3` 3.11 or later and no secret.
+
+1. Build the Package (step 1 below). On the target, create the Packages
+   directory. No parent directory may be group- or other-writable (see step 2
+   below):
+
+   ```sh
+   umask 077
+   mkdir -p ~/.local/lib/teamarness-packages
+   chmod go-w ~ ~/.local ~/.local/lib
+   ```
+
+2. From the build machine, copy the Package Directory and the setup command
+   beside it. Copy each one by name. Do not copy all of `dist/` into
+   `teamarness-packages`, because `--delete` there would remove other Packages:
+
+   ```sh
+   rsync -a --delete ~/src/external-gateway-package/dist/dev.teamarness.external-gateway/ target:.local/lib/teamarness-packages/dev.teamarness.external-gateway/
+   rsync -a ~/src/external-gateway-package/dist/external-gateway-setup target:.local/lib/teamarness-packages/external-gateway-setup
+   ```
+
+3. Write the answers template, then fill it in. Set `workspace_id` to the
+   Workspace ID from the Host's `workspace list`. Set
+   `accept_native_code_risks = true` to accept the native-code risks that the
+   template describes. Choose `tools`:
+
+   ```sh
+   ~/.local/lib/teamarness-packages/external-gateway-setup --print-template ~/gateway-answers.toml
+   ```
+
+4. Apply it:
+
+   ```sh
+   ~/.local/lib/teamarness-packages/external-gateway-setup --answers ~/gateway-answers.toml
+   ```
+
+   Each step prints one line, `unchanged:`, `changed:` or `stopped:`, followed by
+   a summary. A successful first run ends with `check tmx reaches
+   http://127.0.0.1:<port>`. A second run with the same file reports only
+   `unchanged:` lines.
+
+For another Workspace, copy the answers file, change `workspace_id`, and apply
+it. The Package and `tmx` are already installed, so only that Workspace's
+listener, connection and tools change.
+
+Exit status 0 means done, 1 means stopped, and 2 means the answers file or the
+invocation is invalid. Setup checks the file before it sends any request. It
+finds an unknown contract or port only when it reads the catalog, which can be
+after it has enabled that contract; the output lists every change it made. When a line says `outcome unknown`, run
+the inspect command that it prints, then run setup again. Setup never retries a
+change.
+
+Setup only adds: it never disconnects, rotates, repairs, removes tools,
+installs a skill, or reloads the Package. Use the requests in
+[headless onboarding](headless-onboarding.md) for those, and give the skill to
+agents as described in [Hand over to external agents](#hand-over-to-external-agents).
+
+The rest of this guide is the manual path.
 
 ## Machine tier
 
@@ -274,13 +340,16 @@ Build the new version, copy it over the same directory, and reload it:
 
 ```sh
 rsync -a --delete ~/src/external-gateway-package/dist/dev.teamarness.external-gateway/ target:.local/lib/teamarness-packages/dev.teamarness.external-gateway/
+rsync -a ~/src/external-gateway-package/dist/external-gateway-setup target:.local/lib/teamarness-packages/external-gateway-setup
 tm packages reload --package dev.teamarness.external-gateway
 ```
 
 Reload applies to every Workspace. Each Workspace keeps its listener port,
 tool selection, and connection. `tm_req` looks up the new contract digest for
-you. After a reload, inspect each Workspace with `echo '{}' | gw setup.inspect`.
-If `cli.change` is `update`, run `gw_plan install-cli` once to update `tmx`.
+you. After a reload, run `external-gateway-setup --answers` with each
+Workspace's answers file, which updates `tmx` when needed. By hand, inspect
+each Workspace with `echo '{}' | gw setup.inspect`, and if `cli.change` is
+`update`, run `gw_plan install-cli` once.
 
 ## Check the Gateway
 
@@ -295,44 +364,3 @@ For each error code and its fix, see
 [Common errors](headless-onboarding.md#common-errors). If a request reports
 `outcomeUncertain: true`, inspect the state before you do anything else. Do not
 repeat the request automatically.
-
-## Planned: answers-file setup
-
-> [!NOTE]
-> Planned, not implemented. Steps 4 to 10 become one command. The names below
-> are a sketch and can change.
-
-A later release replaces the per-Workspace helpers with an answers file:
-
-1. `setup --print-template` writes a commented answers file.
-2. You fill it in.
-3. `setup --answers <file>` applies it and reports what it did. A second run
-   with the same file changes nothing.
-
-The template has no secret fields, because connect creates the credential. It
-holds these inputs:
-
-```text
-# Workspace to configure, by ID (required).
-workspace: aad43be122caa818738f763c373ba820
-
-# Start the loopback listener (default: true). Connect needs it.
-listener: true
-
-# Connect this Workspace and create its managed credential (default: true).
-connect: true
-
-# Tools to expose. "all" selects every eligible tool of every listed contract.
-# Otherwise, list contracts, each with "all" or with named ports.
-tools:
-  dev.teamarness.conversations: all
-  dev.teamarness.documents: all
-  dev.teamarness.backlog:
-    - ticket.list
-    - ticket.get
-```
-
-The command would install or update `tmx` when needed. It would not install a
-skill, choose a port, or add a tool that the file does not name. It would
-refuse, and change nothing, when a listed contract or port does not exist or
-when a tool's fingerprint needs review.

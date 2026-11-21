@@ -53,6 +53,7 @@ This Package consumes only `teamarness.workspace-context` 1.0, `teamarness.packa
 | `scripts/assemble-package.mjs` | Assembles final Backend, UI, contract, and manifest bytes for one native target into `dist/`. Imported by `build-package.mjs` and its tests; it has no command line of its own. |
 | `scripts/validate-dist.mjs` | Applies Package Admission's rules to `dist/` for the native target, smoke-launches the Backend, then smoke-tests its picker and CLI entry modes. |
 | `scripts/verify-vendor.mjs` | Fails when a vendored SDK file no longer matches recorded provenance. |
+| `scripts/headless/external-gateway-setup` | Headless answers-file setup (Bash plus `python3 -I`). It drives existing Host operator commands and Gateway requests, read-first and with no retries. The build copies it to `dist/external-gateway-setup`, beside the Package Directory and never inside it. `scripts/headless-setup.test.mjs` drives it against `scripts/headless/fake-host.py`. |
 | `vendor/teamarness/` | Contains the generated copies of the Package Process Protocol and SDK source used by this project. |
 | `teamarness-authoring.json` | Records template, protocol, UI host, SDK provenance, and request namespace information. |
 | `Cargo.lock` and `package-lock.json` | Lock this project's Rust and JavaScript dependency graphs. Commit both. |

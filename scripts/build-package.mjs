@@ -13,7 +13,7 @@ import { dirname } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { assemblePackage } from "./assemble-package.mjs";
+import { assemblePackage, shipSetupScript } from "./assemble-package.mjs";
 import { exitCodeFor, nativeTarget, parseTargetArgs, selectTarget } from "./targets.mjs";
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -34,6 +34,7 @@ try {
   run("cargo", ["build", "--release", "--locked", "--target", target]);
   run("npm", ["--workspace", "generated-package-ui", "run", "build"]);
   await assemblePackage({ projectRoot, target, native });
+  await shipSetupScript({ projectRoot });
   run("node", ["scripts/validate-dist.mjs", "--target", target]);
 } catch (error) {
   process.stderr.write(`${error.message}\n`);
