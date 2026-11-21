@@ -290,10 +290,14 @@ admitted contract digest that `package operations` or `package schema` reports.
 Discover it again after every reload. `packages reload` applies to the whole
 Installation, so it reloads every Workspace's Instance of this Package.
 
-The Host's Linux install guide, `docs/headless/install-linux.md` in the
-Teamarness repository, gives a working sequence for each Workspace in
-"Workspace tier", step 8 "Configure the External Gateway". It defines a
-`tm_req` helper that looks up the digest for you.
+Host setup writes `~/.config/teamarness-headless/helpers.sh`, which defines
+`tm` (the operator command) and `tm_req WORKSPACE PACKAGE OPERATION`, which
+looks up the digest for you and reads the request body on stdin. For example:
+
+```sh
+source ~/.config/teamarness-headless/helpers.sh
+echo '{}' | tm_req "$W" dev.teamarness.external-gateway external-gateway.setup.inspect
+```
 
 The Host reports any failure after it dispatches a request as uncertain and
 nonretryable, even when the Package's own error is certain. Read the original

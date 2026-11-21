@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -124,8 +124,8 @@ test("a fresh run sets everything up in order, and a rerun changes nothing", () 
   assert.match(first.stdout, /^changed: cli installed/m);
   assert.match(first.stdout, /^changed: listener on, port 40000/m);
   assert.match(first.stdout, /^changed: connection connected/m);
-  assert.match(first.stdout, /^changed: tools dev\.teamarness\.backlog \+3 \(0 already selected\)/m);
-  assert.match(first.stdout, /^changed: tools dev\.teamarness\.documents \+40/m);
+  assert.match(first.stdout, /^changed: tools dev\.teamarness\.backlog \+3 -0 \(3 selected\)$/m);
+  assert.match(first.stdout, /^changed: tools dev\.teamarness\.documents \+40 -0 \(40 selected\)$/m);
   assert.match(first.stdout, /^unchanged: check tmx reaches http:\/\/127\.0\.0\.1:40000/m);
   assert.match(first.stdout, /^summary: 7 changed, 1 unchanged, 0 stopped$/m);
   const order = first.state.log.map((entry) => entry.split(" ")[0]);
@@ -140,17 +140,55 @@ test("a fresh run sets everything up in order, and a rerun changes nothing", () 
   assert.match(rerun.stdout, /^summary: 0 changed, 8 unchanged, 0 stopped$/m);
 });
 
-test("a per-contract tool list adds only those ports and leaves other selections alone", () => {
-  const f = fixture({ registered: null });
+test("a per-contract tool list is the whole selection: unlisted tools and Packages are turned off", () => {
+  const f = fixture();
   const pre = JSON.parse(readFileSync(f.statePath, "utf8"));
   pre.catalog["dev.teamarness.conversations"].enabled = true;
   pre.catalog["dev.teamarness.conversations"].selected_tools = ["channel.list"];
+  pre.catalog["dev.teamarness.backlog"].enabled = true;
+  pre.catalog["dev.teamarness.backlog"].selected_tools = ["ticket.create", "ticket.get"];
   writeFileSync(f.statePath, JSON.stringify(pre));
-  const out = run(f, ["--answers", answers(f, '[tools]\n"dev.teamarness.backlog" = ["ticket.get", "ticket.list"]')]);
+  const file = answers(f, '[tools]\n"dev.teamarness.backlog" = ["ticket.get", "ticket.list"]');
+  const out = run(f, ["--answers", file]);
   assert.equal(out.status, 0, out.stdout + out.stderr);
   assert.deepEqual(out.state.catalog["dev.teamarness.backlog"].selected_tools, ["ticket.get", "ticket.list"]);
-  assert.deepEqual(out.state.catalog["dev.teamarness.conversations"].selected_tools, ["channel.list"]);
+  assert.equal(out.state.catalog["dev.teamarness.conversations"].enabled, false);
+  assert.deepEqual(out.state.catalog["dev.teamarness.conversations"].selected_tools, []);
   assert.deepEqual(out.state.catalog["dev.teamarness.documents"].selected_tools, []);
+  assert.match(out.stdout, /^changed: tools dev\.teamarness\.conversations turned off \(-1\)$/m);
+  assert.match(out.stdout, /^unchanged: tools dev\.teamarness\.documents not exposed$/m);
+  assert.match(out.stdout, /^changed: tools dev\.teamarness\.backlog \+1 -1 \(2 selected\)$/m);
+  const removals = out.state.log.findIndex((e) => e.startsWith("package.set"));
+  const firstAdd = out.state.log.findIndex((e) => e.startsWith("tool.set") && e.includes('"enabled": true'));
+  assert.ok(removals < firstAdd, "removals come before additions");
+  const rerun = run(f, ["--answers", file]);
+  assert.equal(rerun.status, 0, rerun.stdout + rerun.stderr);
+  assert.deepEqual(rerun.state.log, out.state.log, "a rerun must not mutate");
+});
+
+test("narrowing from all removes the tools no longer listed", () => {
+  const f = fixture();
+  const first = run(f, ["--answers", answers(f)]);
+  assert.equal(first.status, 0, first.stdout + first.stderr);
+  const out = run(f, ["--answers", answers(f, '[tools]\n"dev.teamarness.conversations" = ["channel.list"]')]);
+  assert.equal(out.status, 0, out.stdout + out.stderr);
+  assert.deepEqual(out.state.catalog["dev.teamarness.conversations"].selected_tools, ["channel.list"]);
+  assert.equal(out.state.catalog["dev.teamarness.backlog"].enabled, false);
+  assert.equal(out.state.catalog["dev.teamarness.documents"].enabled, false);
+  assert.match(out.stdout, /^changed: tools dev\.teamarness\.documents turned off \(-40\)$/m);
+  assert.match(out.stdout, /^changed: tools dev\.teamarness\.conversations \+0 -1 \(1 selected\)$/m);
+});
+
+test("an unavailable contract keeps its saved selection", () => {
+  const f = fixture({ gateway: { cli: true, connection: "connected", listener: true } });
+  const pre = JSON.parse(readFileSync(f.statePath, "utf8"));
+  pre.registered = f.packageDir;
+  Object.assign(pre.catalog["dev.teamarness.documents"], { available: false, enabled: true, selected_tools: ["doc.port1"] });
+  writeFileSync(f.statePath, JSON.stringify(pre));
+  const out = run(f, ["--answers", answers(f)]);
+  assert.equal(out.status, 0, out.stdout + out.stderr);
+  assert.deepEqual(out.state.catalog["dev.teamarness.documents"].selected_tools, ["doc.port1"]);
+  assert.match(out.stdout, /^unchanged: tools dev\.teamarness\.documents unavailable; its saved selection is left as is$/m);
 });
 
 test("an uncertain connect stops at once with an inspect command, and makes no later change", () => {
@@ -225,6 +263,7 @@ test("an unknown contract or port is invalid input", () => {
   const port = run(f, ["--answers", answers(f, '[tools]\n"dev.teamarness.backlog" = ["ticket.nope"]')]);
   assert.equal(port.status, 2);
   assert.match(port.stdout, /^stopped: tools dev\.teamarness\.backlog has no eligible port\(s\): ticket\.nope/m);
+  assert.deepEqual(port.state.log, [], "invalid tools input changes nothing");
 });
 
 test("a Workspace name resolves to its ID through the Host's Workspace list", () => {
@@ -262,4 +301,50 @@ test("an older answers file with workspace_id still works", () => {
   const out = run(f, ["--answers", answers(f, `workspace_id = "${W}"`)]);
   assert.equal(out.status, 0, out.stdout + out.stderr);
   assert.match(out.stdout, new RegExp(`^workspace: Headless ${W}$`, "m"));
+});
+
+function templateTools() {
+  const f = fixture();
+  const text = run(f, ["--print-template"]).stdout;
+  const block = text.slice(text.indexOf("# [tools]\n"));
+  const tools = {};
+  for (const m of block.matchAll(/^# "([^"]+)" = (\[.*\])$/gm)) tools[m[1]] = JSON.parse(m[2]);
+  return { text, tools };
+}
+
+test("the template's commented [tools] table uncomments into a valid answers file that selects every listed tool", () => {
+  const { text, tools } = templateTools();
+  assert.deepEqual(Object.keys(tools).sort(), ["dev.teamarness.backlog", "dev.teamarness.conversations", "dev.teamarness.documents", "dev.teamarness.exhibits"]);
+  for (const ports of Object.values(tools)) {
+    assert.ok(!ports.includes("runtime.guide"));
+    assert.deepEqual(ports, [...ports].sort());
+  }
+  const catalog = {};
+  for (const [c, ports] of Object.entries(tools)) catalog[c] = { provider: c, enabled: false, selected_tools: [], ports: ["runtime.guide", ...ports] };
+  const f = fixture({ catalog });
+  const uncommented = text.replace(/^tools = "all"\n/m, "").replace(/^# (\[tools\]|"dev\.)/gm, "$1");
+  const path = join(f.root, "template-answers.toml");
+  writeFileSync(path, uncommented.replace(/^(host_app|host_data_dir|package_dir|workspace|accept_native_code_risks) = .*$/gm, (line, k) => `${k} = ${{
+    host_app: JSON.stringify(f.host), host_data_dir: JSON.stringify(join(f.root, "data")), package_dir: JSON.stringify(f.packageDir),
+    workspace: JSON.stringify(W), accept_native_code_risks: "true" }[k]}`));
+  const out = run(f, ["--answers", path]);
+  assert.equal(out.status, 0, out.stdout + out.stderr);
+  for (const [c, ports] of Object.entries(tools)) assert.deepEqual([...out.state.catalog[c].selected_tools].sort(), ports);
+});
+
+// The template lists the Provider tools by name. Set TEAMARNESS_CHECKOUT to a Teamarness checkout
+// to compare the list with the Providers' ports.json, so a Provider change shows up as a failure.
+const checkout = process.env.TEAMARNESS_CHECKOUT;
+test("the template's tool list matches the Provider contracts", { skip: checkout ? false : "set TEAMARNESS_CHECKOUT to a Teamarness checkout to compare" }, () => {
+  const expected = {};
+  const packages = join(checkout, "packages");
+  for (const name of readdirSync(packages)) {
+    const file = join(packages, name, "ports.json");
+    if (!existsSync(file)) continue;
+    for (const contract of JSON.parse(readFileSync(file, "utf8")).contracts) {
+      const ports = (Array.isArray(contract.ports) ? contract.ports.map((p) => p.name) : Object.keys(contract.ports)).filter((p) => p !== "runtime.guide");
+      expected[contract.identity] = ports.sort();
+    }
+  }
+  assert.deepEqual(templateTools().tools, expected);
 });

@@ -61,14 +61,20 @@ listener = true
 # false skips connecting; setup never disconnects, repairs or rotates.
 connect = true
 
-# Tools to expose to external agents through tmx. Selection only adds tools; tools you do not
-# list stay as they are.
-#   tools = "all"   every eligible tool of every available contract
-# or, instead, a table (delete the line above):
-#   [tools]
-#   "dev.teamarness.conversations" = "all"
-#   "dev.teamarness.backlog" = ["ticket.list", "ticket.get"]
+# Tools to expose to external agents through tmx. This is the whole selection: each run
+# selects exactly these tools, and turns off every other tool and every Package it does not name.
+#   tools = "all"   every tool of every available Package
 tools = "all"
+
+# To expose less, delete the line above, uncomment [tools] and the Packages you want, and
+# trim their lists. A Package you leave commented out is not exposed. A Package can also be
+# "all", for example "dev.teamarness.conversations" = "all". runtime.guide is not a
+# selectable tool, so it is never listed.
+# [tools]
+# "dev.teamarness.backlog" = ["backlog.changed", "ticket.create", "ticket.get", "ticket.list", "ticket.update"]
+# "dev.teamarness.conversations" = ["channel.list", "message.changes", "message.page", "message.post", "messages.changed"]
+# "dev.teamarness.documents" = ["comment.add", "comment.changes", "comment.thread", "comments.changed", "document.create", "document.list", "document.markdown", "document.revise", "documents.changed"]
+# "dev.teamarness.exhibits" = ["draft.delete", "draft.update", "exhibit.list", "exhibit.read", "file.put", "file.read", "file.text", "file.write", "files.missing"]
 '''
 
 KEYS = {
@@ -363,44 +369,86 @@ def tool_rows(host, contract):
             return rows
 
 def step_tools(host, a):
+    """Make the Gateway selection exactly the answers: add what is missing, remove the rest.
+
+    Every read and check happens before the first change, so invalid input changes nothing.
+    A contract that is currently unavailable keeps its saved selection: its Provider may only
+    be restarting, and setup cannot tell that from removal.
+    """
     contracts = {r["contract"]: r for r in catalog_contracts(host)}
+    available = sorted(c for c, r in contracts.items() if r.get("available"))
     if a["tools"] == "all":
-        wanted = {c: "all" for c, r in contracts.items() if r.get("available")}
+        wanted = {c: "all" for c in available}
     else:
         wanted = a["tools"]
         for c in wanted:
-            if c not in contracts or not contracts[c].get("available"):
+            if c not in available:
                 raise Stop(f"tools contract {c} is not available in this Workspace", 2)
-    for contract, ports in wanted.items():
+    plan = {}
+    for contract in available:
+        tools = {t["port"]: t for t in tool_rows(host, contract)}
+        selected = sorted(p for p, t in tools.items() if t.get("selected"))
+        ports = wanted.get(contract)
+        if ports is None:
+            chosen = []
+        elif ports == "all":
+            chosen = sorted(p for p, t in tools.items() if t.get("eligible"))
+        else:
+            unknown = [p for p in ports if p not in tools or not tools[p].get("eligible")]
+            if unknown:
+                raise Stop(f"tools {contract} has no eligible port(s): {', '.join(unknown)}", 2)
+            chosen = sorted(set(ports))
+        review = [p for p in chosen if tools[p].get("reviewRequired")]
+        if review:
+            raise Stop(f"tools {contract} needs review for: {', '.join(review)}; review them in the Gateway settings, then rerun setup")
+        plan[contract] = (tools, selected, chosen)
+    wanted_providers = {contracts[c]["provider"] for c in wanted}
+
+    # Remove first, so a stop part-way never leaves more exposed than the answers allow.
+    for contract, (tools, selected, chosen) in plan.items():
+        if chosen:
+            continue
+        row = contracts[contract]
+        if not row.get("selected") and not selected:
+            report("unchanged", f"tools {contract} not exposed")
+            continue
+        if row["provider"] not in wanted_providers:
+            host.change("tools", "package.set", {"provider": row["provider"], "enabled": False,
+                        "contracts": [{"contract": contract, "major": row["major"]}]}, "catalog.page")
+        else:
+            for port in selected:
+                set_tool(host, row, contract, tools[port], False)
+            if not selected:
+                raise Stop(f"tools {contract} is enabled with no tools and shares its Provider with a listed contract; "
+                           "turn it off in the Gateway settings, then rerun setup")
+        report("changed", f"tools {contract} turned off (-{len(selected)})")
+    for c, r in contracts.items():
+        if not r.get("available") and r.get("selected"):
+            report("unchanged", f"tools {c} unavailable; its saved selection is left as is")
+
+    for contract, (tools, selected, chosen) in plan.items():
+        if not chosen:
+            continue
         row = contracts[contract]
         enabled_now = False
         if not (row.get("selected") and row.get("hostEnabled")):
             host.change("tools", "package.set", {"provider": row["provider"], "enabled": True,
                         "contracts": [{"contract": contract, "major": row["major"]}]}, "catalog.page")
             enabled_now = True
-        tools = {t["port"]: t for t in tool_rows(host, contract)}
-        if ports == "all":
-            chosen = [t for t in tools.values() if t.get("eligible")]
+        add = [p for p in chosen if p not in selected]
+        drop = [p for p in selected if p not in chosen]
+        for port in add:
+            set_tool(host, row, contract, tools[port], True)
+        for port in drop:
+            set_tool(host, row, contract, tools[port], False)
+        if add or drop or enabled_now:
+            report("changed", f"tools {contract} +{len(add)} -{len(drop)} ({len(chosen)} selected)")
         else:
-            unknown = [p for p in ports if p not in tools or not tools[p].get("eligible")]
-            if unknown:
-                raise Stop(f"tools {contract} has no eligible port(s): {', '.join(unknown)}", 2)
-            chosen = [tools[p] for p in ports]
-        review = [t["port"] for t in chosen if t.get("reviewRequired")]
-        if review:
-            raise Stop(f"tools {contract} needs review for: {', '.join(review)}; review them in the Gateway settings, then rerun setup")
-        added = 0
-        for t in chosen:
-            if t.get("selected"):
-                continue
-            host.change("tools", "tool.set", {"contract": contract, "major": row["major"], "provider": row["provider"],
-                        "port": t["port"], "fingerprint": t["fingerprint"], "enabled": True}, "catalog.page")
-            added += 1
-        already = len(chosen) - added
-        if added or enabled_now:
-            report("changed", f"tools {contract} +{added} ({already} already selected)")
-        else:
-            report("unchanged", f"tools {contract} ({already} selected)")
+            report("unchanged", f"tools {contract} ({len(chosen)} selected)")
+
+def set_tool(host, row, contract, tool, enabled):
+    host.change("tools", "tool.set", {"contract": contract, "major": row["major"], "provider": row["provider"],
+                "port": tool["port"], "fingerprint": tool["fingerprint"], "enabled": enabled}, "catalog.page")
 
 def step_check(cli, w):
     path = cli.get("path")

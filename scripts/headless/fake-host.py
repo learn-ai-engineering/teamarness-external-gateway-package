@@ -144,20 +144,33 @@ def request(s, op, body):
         start = int(body.get("cursor", "0"))
         page = names[start:start + 2]
         rows = [{"contract": n, "major": 1, "provider": s["catalog"][n]["provider"], "displayName": n,
-                 "available": True, "hostEnabled": s["catalog"][n]["enabled"], "selected": s["catalog"][n]["enabled"],
+                 "available": s["catalog"][n].get("available", True), "hostEnabled": s["catalog"][n]["enabled"],
+                 "selected": s["catalog"][n]["enabled"],
                  "guideEligibility": "eligible"} for n in page]
         out({"contracts": rows, "nextCursor": str(start + 2) if start + 2 < len(names) else None,
              "tools": [], "nextOffset": None})
     if op == "package.set":
+        if not body["enabled"]:
+            for c in s["catalog"].values():
+                if c["provider"] == body["provider"]:
+                    c["enabled"], c["selected_tools"] = False, []
+            save(s)
+            out({"ok": True, "warning": None})
         c = s["catalog"][body["contracts"][0]["contract"]]
-        assert body["provider"] == c["provider"] and body["enabled"] is True
+        assert body["provider"] == c["provider"] and c.get("available", True)
         c["enabled"] = True
         save(s)
         out({"ok": True, "warning": None})
     if op == "tool.set":
         c = s["catalog"][body["contract"]]
-        assert c["enabled"] and body["fingerprint"] == "fp-" + body["port"]
-        c["selected_tools"].append(body["port"])
+        assert body["fingerprint"] == "fp-" + body["port"]
+        if body["enabled"]:
+            assert c["enabled"] and body["port"] not in c["selected_tools"]
+            c["selected_tools"].append(body["port"])
+        else:
+            c["selected_tools"].remove(body["port"])
+            if not c["selected_tools"]:
+                c["enabled"] = False
         save(s)
         out({"ok": True, "warning": None})
     error("invalid_input", False)
