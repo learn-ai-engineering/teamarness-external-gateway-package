@@ -19,9 +19,15 @@ request, including verify, rotate, disconnect, repair, and the error codes.
 You need a running headless Teamarness Host on the target machine that has
 joined at least one Workspace. Complete the Host guide, "Install headless
 Teamarness on Linux" (`docs/headless/install-linux.md` in the Teamarness
-repository), through step 5, "Join the Workspace", first. The manual steps use
-the `tm` and `tm_req` helpers from its step 3, "Define the shell helpers". The
-setup command does not need them.
+repository), through "Run setup", with a Workspace Invitation, first. The
+Workspace ID is on the `workspace:` line that Host setup prints.
+
+The setup command below needs no helpers. The manual steps use the Host's `tm`
+and `tm_req` helpers. Load them in each shell first:
+
+```sh
+source ~/.config/teamarness-headless/helpers.sh
+```
 
 Run the Host, the Gateway, `tmx`, and every external agent that uses `tmx`
 under the same unprivileged OS account. The Gateway resolves that account's
@@ -57,7 +63,8 @@ again at any time. It needs `python3` 3.11 or later and no secret.
    ```
 
 3. Write the answers template, then fill it in. Set `workspace_id` to the
-   Workspace ID from the Host's `workspace list`. Set
+   Workspace ID from the `workspace:` line of Host setup, or from
+   `tm workspace list`. Set
    `accept_native_code_risks = true` to accept the native-code risks that the
    template describes. Choose `tools`:
 
@@ -128,7 +135,8 @@ The Gateway checks every directory above its own executable. Each directory
 from `/` down to the Package Directory must be owned by you or by `root`, must
 not be group- or other-writable, and must not be a symbolic link. Ubuntu's
 default `0002` umask makes `mkdir -p` create group-writable directories. The
-Host guide's step 1 already fixes `~`, `~/.local` and `~/.local/lib`. Create the
+Host setup already removes group and other write access from the directories
+you own above its install location, including `~/.local/lib`. Create the
 Package directory under `umask 077`, and run the check again:
 
 ```sh
@@ -173,8 +181,7 @@ Installation.
 
 ## Workspace tier
 
-Repeat these steps for each Workspace, after the Host guide's step 5 has
-joined it. Set `W` to the Workspace ID from `tm workspace list`, for example
+Repeat these steps for each Workspace, after Host setup has joined it. Set `W` to the Workspace ID from `tm workspace list`, for example
 `W=aad43be122caa818738f763c373ba820`. Always select Workspaces by ID.
 
 `tmx` is installed once for your OS user. The listener and its port, the tool
@@ -183,7 +190,8 @@ None of them carries over from another Workspace.
 
 ### 4. Define the Gateway helpers
 
-Paste these helpers into the shell after the Host's `tm` and `tm_req` helpers.
+Run `source ~/.config/teamarness-headless/helpers.sh` first, then paste these
+helpers into the same shell.
 `gw` sends one Gateway request with its JSON body on stdin. `gw_plan` previews
 and applies one setup intent, then waits until the operation finishes:
 
