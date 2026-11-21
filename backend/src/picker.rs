@@ -94,11 +94,17 @@ impl Picker {
         })
     }
     /// Returns without hashing, spawning or waiting for the Person. Jobs are joined on lifecycle stop.
+    /// The native chooser exists only on macOS; other targets refuse here, before any
+    /// capacity, hashing or helper spawn, with the stable non-retryable
+    /// `external_gateway.picker_unavailable`.
     pub fn choose(
         self: &Arc<Self>,
         setup: Arc<SetupCoordinator>,
         observer: CancellationToken,
     ) -> Result<EventSubscription> {
+        if !cfg!(target_os = "macos") {
+            return Err(error("picker_unavailable"));
+        }
         let mut m = self.memory.lock().expect("picker memory");
         m.jobs.retain(|j| !j.task.is_finished());
         if m.closed {

@@ -171,6 +171,13 @@ pub fn run(arguments: Vec<String>, injected_home: Option<PathBuf>) -> u8 {
         Command::Licenses => {
             return emit(success(third_party_notices().into_bytes()));
         }
+        Command::Skill => {
+            return match portable_skill() {
+                // Exact file bytes: a redirect equals the selected-folder publication.
+                Ok(skill) => emit_exact(skill.as_bytes()),
+                Err(e) => emit(e.into()),
+            };
+        }
         Command::Version => {
             return emit(success(
                 format!("tmx {} (CLI {CLI_MAJOR})", crate::PACKAGE_VERSION).into_bytes(),
@@ -273,6 +280,21 @@ async fn run_subscription(parsed: Args, injected_home: Option<PathBuf>) -> u8 {
     .await
 }
 
+/// Offline: names this running executable's canonical path, with no home, store, network or AppKit.
+fn portable_skill() -> Result<String, Failure> {
+    let unavailable = |_| Failure::usage("cli.skill_unavailable");
+    let command = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
+        .map_err(unavailable)?;
+    crate::skill_install::render(&command).map_err(|_| Failure::usage("cli.skill_unavailable"))
+}
+fn emit_exact(bytes: &[u8]) -> u8 {
+    let mut out = std::io::stdout().lock();
+    if out.write_all(bytes).and_then(|()| out.flush()).is_err() {
+        return 1;
+    }
+    0
+}
 fn emit(mut outcome: Outcome) -> u8 {
     outcome.bytes.push(b'\n');
     if std::io::stdout().lock().write_all(&outcome.bytes).is_err() {

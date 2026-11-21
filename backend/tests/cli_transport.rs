@@ -275,6 +275,24 @@ async fn hostile_proxy_environment_cannot_redirect_credentials_and_fixture_requi
         .unwrap();
     assert_eq!(absent.status.code(), Some(2));
     assert!(absent.stdout.is_empty());
+    // An absent injected home is unreadable for store commands but irrelevant to offline skill text.
+    let missing = std::env::temp_dir().join("teamarness-missing-fixture-home-never-created");
+    assert!(!missing.exists());
+    let store = std::process::Command::new(&executable)
+        .arg("workspaces")
+        .env("TEAMARNESS_FIXTURE_HOME", &missing)
+        .output()
+        .unwrap();
+    assert_eq!(store.status.code(), Some(2));
+    let skill = std::process::Command::new(&executable)
+        .arg("--skill")
+        .env("TEAMARNESS_FIXTURE_HOME", &missing)
+        .output()
+        .unwrap();
+    assert_eq!(skill.status.code(), Some(0));
+    assert!(skill.stderr.is_empty());
+    assert!(skill.stdout.starts_with(b"---\nname: teamarness\n"));
+    assert!(!missing.exists());
     let f = Fixture::new(vec![
         response(MANIFEST.as_bytes()),
         response(b"{\"result\":true}"),
@@ -305,7 +323,7 @@ async fn sigint_during_possible_call_is_130_uncertain_and_closes_without_replay(
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let executable = fixture_executable();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let home = tempfile::tempdir().unwrap();
+    let home = private_home();
     let mut c = connection("workspace-a", "Acme");
     c.port = listener.local_addr().unwrap().port();
     ClientStore::for_home(&home.path().canonicalize().unwrap())

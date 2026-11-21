@@ -8,13 +8,13 @@
     "vendor/teamarness/package-ui-sdk"
   ],
   "scripts": {
-    "build": "cargo build --release --locked && npm --workspace generated-package-ui run build && node scripts/assemble-package.mjs && npm run validate:dist",
+    "build": "node scripts/build-package.mjs",
     "typecheck": "cargo check --workspace --locked && npm --workspace generated-package-ui run typecheck",
     "lint": "cargo fmt --all --check && cargo clippy --workspace --all-targets --all-features --locked -- -D warnings && npm --workspace generated-package-ui run lint",
     "validate": "cargo run --quiet --locked -p teamarness-package-contract --bin teamarness-package-validate -- source .",
     "validate:dist": "node scripts/validate-dist.mjs",
     "check:vendor": "node scripts/verify-vendor.mjs",
-    "test": "npm run validate && npm run check:vendor && npm run check:exact-pins && npm run check:contracts && cargo test --workspace --locked && npm --workspace generated-package-ui test && node --test scripts/assemble-package.test.mjs",
+    "test": "npm run validate && npm run check:vendor && npm run check:exact-pins && npm run check:contracts && cargo test --workspace --locked && npm --workspace generated-package-ui test && node --test scripts/targets.test.mjs scripts/assemble-package.test.mjs scripts/build-package.test.mjs scripts/headless-setup.test.mjs",
     "check:exact-pins": "node scripts/check-exact-pins.mjs",
     "check:contracts": "node scripts/check-contracts.mjs"
   }

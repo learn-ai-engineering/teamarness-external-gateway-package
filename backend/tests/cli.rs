@@ -42,13 +42,14 @@ async fn target_required_even_for_one_workspace() {
 }
 #[tokio::test]
 async fn id_wins_and_exact_names_must_be_unique() {
-    use teamarness_generated_package_backend::client_store::ClientStore;
-    let f = Fixture::new(vec![response(MANIFEST.as_bytes())]).await;
-    let store = ClientStore::for_home(&f.home.path().canonicalize().unwrap()).unwrap();
-    store.publish(&connection("workspace-b", "Acme")).unwrap();
-    store
-        .publish(&connection("workspace-c", "workspace-a"))
-        .unwrap();
+    let f = Fixture::with_connections(
+        vec![response(MANIFEST.as_bytes())],
+        vec![
+            connection("workspace-b", "Acme"),
+            connection("workspace-c", "workspace-a"),
+        ],
+    )
+    .await;
     let ambiguous = f.run(&["--workspace", "Acme", "status"]).await;
     assert_eq!(ambiguous.exit, 2);
     assert_eq!(
@@ -169,7 +170,7 @@ fn native_entry_modes_never_fall_back_to_host_stdio() {
     assert!(helper.stderr.is_empty());
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("tmx");
-    std::fs::copy(exe, &copy).unwrap();
+    copy_executable(exe.as_ref(), &copy);
     let out = Command::new(copy)
         .current_dir(dir.path())
         .env_clear()
@@ -207,6 +208,116 @@ async fn os_home_adapter_rejects_errors_ambiguity_overflow_and_timeout_without_f
         .unwrap();
         assert_eq!(result.unwrap_err().code, "cli.home_unavailable");
     }
+}
+#[test]
+fn linux_getent_parser_accepts_only_one_exact_effective_user_entry() {
+    // Pure parser; runs on every platform and never consults the real account database.
+    use teamarness_generated_package_backend::cli::home::parse_getent;
+    assert_eq!(
+        parse_getent(
+            b"fixture:x:501:20:Fixture:/home/fixture user:/bin/sh\n",
+            501
+        )
+        .unwrap(),
+        std::path::PathBuf::from("/home/fixture user")
+    );
+    assert_eq!(
+        parse_getent(b"root:x:0:0::/:/bin/sh", 0).unwrap(),
+        std::path::PathBuf::from("/")
+    );
+    for (bytes, uid) in [
+        (
+            b"fixture:x:502:20:Fixture:/home/fixture:/bin/sh\n".as_slice(),
+            501,
+        ),
+        (b"fixture:x:0501:20:Fixture:/home/fixture:/bin/sh\n", 501),
+        (b"fixture:x:+501:20:Fixture:/home/fixture:/bin/sh\n", 501),
+        (
+            b"fixture:x:501:20:Fixture:/home/a:/bin/sh\nfixture:x:501:20:Fixture:/home/b:/bin/sh\n",
+            501,
+        ),
+        (b"fixture:x:501:20:Fixture:/home/a:/bin/sh\n\n", 501),
+        (b"\nfixture:x:501:20:Fixture:/home/a:/bin/sh\n", 501),
+        (b"fixture:x:501:20:Fixture:/home/fixture\n", 501),
+        (
+            b"fixture:x:501:20:Fixture:/home/fixture:/bin/sh:extra\n",
+            501,
+        ),
+        (b"fixture:x:501:20:Fixture:home/fixture:/bin/sh\n", 501),
+        (b"fixture:x:501:20:Fixture::/bin/sh\n", 501),
+        (b"fixture:x:501:20:Fixture:/home/a\x00b:/bin/sh\n", 501),
+        (b"fixture:x:501:20:Fixture:/home/a\tb:/bin/sh\n", 501),
+        (b"fixture:x:501:20:Fixture:/home/a\x7f:/bin/sh\n", 501),
+        (b"", 501),
+        (b"\n", 501),
+        (b"fixture:x:501:20:\xff:/home/fixture:/bin/sh\n", 501),
+        // The macOS dscacheutil shape is never accepted by the Linux parser.
+        (b"name: fixture\ndir: /home/fixture\n", 501),
+    ] {
+        assert_eq!(
+            parse_getent(bytes, uid).unwrap_err().code,
+            "cli.home_unavailable",
+            "{bytes:?}"
+        );
+    }
+}
+#[tokio::test]
+async fn linux_getent_lookup_rejects_exit_overflow_and_timeout_without_fallback() {
+    use teamarness_generated_package_backend::cli::home::{lookup_with, parse_getent};
+    let parser = |bytes: &[u8]| parse_getent(bytes, 501);
+    let ok = lookup_with(
+        tokio::process::Command::new("/bin/sh")
+            .args(["-c", "printf 'f:x:501:20::/home/f:/bin/sh\\n'"])
+            .env_clear(),
+        parser,
+    )
+    .await
+    .unwrap();
+    assert_eq!(ok, std::path::PathBuf::from("/home/f"));
+    for script in [
+        "printf 'f:x:501:20::/home/f:/bin/sh\\n'; exit 2",
+        "exec /bin/sleep 10",
+        "/usr/bin/yes x | /usr/bin/head -c 16385",
+        "/usr/bin/yes x | /usr/bin/head -c 4097 >&2; printf 'f:x:501:20::/home/f:/bin/sh\\n'",
+    ] {
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(4),
+            lookup_with(
+                tokio::process::Command::new("/bin/sh")
+                    .args(["-c", script])
+                    .env_clear(),
+                parser,
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.unwrap_err().code, "cli.home_unavailable", "{script}");
+    }
+}
+#[test]
+fn notices_cover_linux_only_rustix_backend_and_state_both_targets() {
+    let text = teamarness_generated_package_backend::cli::third_party_notices();
+    assert!(text.contains(
+        "Component list: locked normal production Backend dependencies for both supported targets, aarch64-apple-darwin and x86_64-unknown-linux-gnu"
+    ));
+    assert!(text.contains("A given native binary may not contain every listed component."));
+    let entry = "linux-raw-sys 0.12.1\n\
+License: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT\n\
+Repository: https://github.com/sunfishcode/linux-raw-sys\n\
+Authors (upstream metadata): Dan Gohman <dev@sunfishcode.online>\n\
+Notice source: https://crates.io/crates/linux-raw-sys/0.12.1; registry source checksum in Cargo.lock; COPYRIGHT, LICENSE-APACHE, LICENSE-Apache-2.0_WITH_LLVM-exception, LICENSE-MIT; Linux-only rustix backend (x86_64-unknown-linux-gnu)\n\
+Literal notice SHA-256: 3290ae0fbc9ddb77d2239121d710f0bb9d31b3b4744e6d97fe01e652b4c1870b, a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2, 268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5, 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3\n";
+    assert!(text.contains(entry));
+    // Its COPYRIGHT names linux-raw-sys, so it is stored literally rather than shared with rustix.
+    let copyright = text
+        .split_once(
+            "\n===== SHA-256 3290ae0fbc9ddb77d2239121d710f0bb9d31b3b4744e6d97fe01e652b4c1870b =====\n",
+        )
+        .unwrap()
+        .1;
+    assert!(copyright.starts_with(
+        "Short version for non-lawyers:\n\n`linux-raw-sys` is triple-licensed under Apache 2.0 with the LLVM Exception,\n"
+    ));
 }
 #[test]
 fn cursor_target_and_input_depth_boundaries_reject_before_sockets() {
@@ -307,7 +418,7 @@ fn licenses_are_offline_embedded_and_reject_other_arguments() {
         .collect::<String>();
     assert_eq!(
         hash,
-        "ec776f9c33537ea40c5049518ba03cd7ded30ed836863a59fb2a856d959e9af3"
+        "6bee8926c87f2657779ce17a234f958c7c57440e60bf97e572e659f38dfc4fe7"
     );
     // Independent original registry notice, not an expectation decoded by the CLI.
     let rfd = include_bytes!("fixtures/notices/rfd-0.16.1-LICENSE");
@@ -350,6 +461,125 @@ fn licenses_are_offline_embedded_and_reject_other_arguments() {
     }
 }
 
+/// Independent POSIX single-quoting of the expected canonical command word.
+fn expected_skill(command: &std::path::Path) -> String {
+    let word = format!("'{}'", command.to_str().unwrap().replace('\'', "'\\''"));
+    include_str!("../resources/teamarness/SKILL.md").replace("{{COMMAND}}", &word)
+}
+fn assert_portable_skill(stdout: &[u8], command: &std::path::Path) {
+    let text = std::str::from_utf8(stdout).unwrap();
+    assert_eq!(text, expected_skill(command));
+    for forbidden in ["{{", "eg1.", ".local/share", "Bearer"] {
+        assert!(!text.contains(forbidden), "{forbidden}");
+    }
+}
+#[test]
+fn skill_is_offline_rendered_for_the_canonical_invoked_executable() {
+    let exe = env!("CARGO_BIN_EXE_teamarness-generated-package-backend");
+    let dir = tempfile::tempdir().unwrap();
+    // Temporary directories are reached through a symlinked /var on macOS; output is canonical.
+    // Linux /tmp is not a symlink, so there the `link dir` symlink below alone proves it.
+    let folder = dir.path().join("it's a dir");
+    std::fs::create_dir(&folder).unwrap();
+    let copy = folder.join("tmx");
+    copy_executable(exe.as_ref(), &copy);
+    let canonical = copy.canonicalize().unwrap();
+    #[cfg(target_os = "macos")]
+    assert_ne!(canonical, copy);
+    let links = dir.path().join("link dir");
+    std::fs::create_dir(&links).unwrap();
+    let link = links.join("tmx");
+    std::os::unix::fs::symlink(&copy, &link).unwrap();
+    for (path, args) in [
+        (copy.clone(), vec!["--skill"]),
+        (copy.clone(), vec!["--tmx-cli", "--skill"]),
+        (link, vec!["--skill"]),
+    ] {
+        let output = Command::new(&path)
+            .args(args)
+            .current_dir(dir.path())
+            .env_clear()
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stderr.is_empty());
+        assert_portable_skill(&output.stdout, &canonical);
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .contains("it'\\''s a dir/tmx' workspaces\n")
+        );
+    }
+    let output = Command::new(exe)
+        .args(["--tmx-cli", "--skill"])
+        .env_clear()
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    assert_portable_skill(
+        &output.stdout,
+        &std::path::Path::new(exe).canonicalize().unwrap(),
+    );
+}
+#[test]
+fn skill_refuses_extra_arguments_and_unquotable_executable_paths() {
+    let exe = env!("CARGO_BIN_EXE_teamarness-generated-package-backend");
+    for args in [
+        vec!["--skill", "extra"],
+        vec!["--skill", "--version"],
+        vec!["--version", "--skill"],
+        vec!["--skill", "--skill"],
+        vec!["--skill", "--licenses"],
+        vec!["--workspace", "a", "--skill"],
+        vec!["workspaces", "--skill"],
+    ] {
+        let output = Command::new(exe)
+            .arg("--tmx-cli")
+            .args(&args)
+            .env_clear()
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        assert_eq!(
+            output.stdout,
+            br#"{"error":{"code":"cli.invalid_arguments","details":{},"outcomeUncertain":false,"retryable":false,"source":"cli"}}
+"#,
+            "{args:?}"
+        );
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("control\u{1}dir");
+    std::fs::create_dir(&folder).unwrap();
+    let copy = folder.join("tmx");
+    copy_executable(exe.as_ref(), &copy);
+    let output = Command::new(&copy)
+        .arg("--skill")
+        .env_clear()
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        output.stdout,
+        br#"{"error":{"code":"cli.skill_unavailable","details":{},"outcomeUncertain":false,"retryable":false,"source":"cli"}}
+"#
+    );
+    assert!(!output.stderr.is_empty());
+}
+#[test]
+fn help_lists_offline_skill_option() {
+    let output = Command::new(env!("CARGO_BIN_EXE_teamarness-generated-package-backend"))
+        .args(["--tmx-cli", "--help"])
+        .output()
+        .unwrap();
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        help.contains(
+            "\n  --skill             Offline portable skill text for manual installation\n"
+        )
+    );
+}
+
 #[test]
 fn embedded_literal_notice_checksums_are_intact() {
     use sha2::{Digest, Sha256};
@@ -372,5 +602,18 @@ fn embedded_literal_notice_checksums_are_intact() {
         );
         count += 1;
     }
-    assert_eq!(count, 82);
+    assert_eq!(count, 83);
+}
+/// Copies an executable through a separate `cp` process, so this multi-threaded test
+/// process never holds a write descriptor to it. On Linux a child that a parallel test
+/// thread is spawning inherits such a descriptor until it execs, and running the copy
+/// meanwhile fails with ETXTBSY ("Text file busy").
+fn copy_executable(from: &std::path::Path, to: &std::path::Path) {
+    let status = std::process::Command::new("/bin/cp")
+        .arg("--")
+        .args([from, to])
+        .env_clear()
+        .status()
+        .unwrap();
+    assert!(status.success(), "copy executable fixture");
 }

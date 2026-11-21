@@ -5,10 +5,10 @@ use teamarness_generated_package_backend::{
 };
 #[test]
 fn skill_is_portable_secret_free_and_uses_one_literal_absolute_command() {
-    let home = tempfile::tempdir().unwrap();
+    let home = private_temp();
     let home = home.path().canonicalize().unwrap();
     let selected = home.join("agent's skills with spaces");
-    fs::create_dir(&selected).unwrap();
+    private_dir(&selected).unwrap();
     let command = home.join(".local/bin/tmx");
     let managed = ManagedInstaller::for_home(&home).unwrap();
     let installer = SkillInstaller::new(&managed);
@@ -72,10 +72,10 @@ fn state(home: &Path) -> PathBuf {
     home.join(".local/share/teamarness/external-gateway/managed")
 }
 fn setup() -> (tempfile::TempDir, PathBuf, PathBuf) {
-    let t = tempfile::tempdir().unwrap();
+    let t = private_temp();
     let h = t.path().canonicalize().unwrap();
     let selected = h.join("selected");
-    fs::create_dir(&selected).unwrap();
+    private_dir(&selected).unwrap();
     (t, h, selected)
 }
 fn install(home: &Path, selected: &Path) {
@@ -98,12 +98,31 @@ fn previous_skill(selected: &Path) {
     fs::write(receipt, serde_json::to_vec(&v).unwrap()).unwrap();
 }
 #[test]
+fn offline_render_is_byte_identical_to_installed_skill_for_the_same_command() {
+    use teamarness_generated_package_backend::skill_install::render;
+    let (_t, base, _) = setup();
+    let home = base.join("it's a home");
+    private_dir(&home).unwrap();
+    let selected = base.join("agent skills");
+    private_dir(&selected).unwrap();
+    install(&home, &selected);
+    let managed = ManagedInstaller::for_home(&home).unwrap();
+    let rendered = render(&managed.command_path()).unwrap();
+    assert_eq!(
+        rendered.as_bytes(),
+        fs::read(selected.join("teamarness/SKILL.md")).unwrap()
+    );
+    assert!(!rendered.contains("{{"));
+    assert!(render(Path::new("relative/tmx")).is_err());
+    assert!(render(Path::new("/control\n/tmx")).is_err());
+}
+#[test]
 fn command_with_spaces_and_literal_apostrophes_is_a_single_executable_word() {
     let (_t, base, _) = setup();
     let home = base.join("my home's space");
-    fs::create_dir(&home).unwrap();
+    private_dir(&home).unwrap();
     let selected = base.join("agent's space");
-    fs::create_dir(&selected).unwrap();
+    private_dir(&selected).unwrap();
     install(&home, &selected);
     let content = fs::read_to_string(selected.join("teamarness/SKILL.md")).unwrap();
     let expected = format!(
@@ -206,16 +225,16 @@ fn replaced_selected_folder_or_destination_requires_new_preview() {
             let plan = i.preview(&selected, admission()).unwrap();
             if parent {
                 fs::rename(&selected, h.join("previous-folder")).unwrap();
-                fs::create_dir(&selected).unwrap();
+                private_dir(&selected).unwrap();
             } else if existing {
                 fs::rename(
                     selected.join("teamarness"),
                     selected.join("previous-teamarness"),
                 )
                 .unwrap();
-                fs::create_dir(selected.join("teamarness")).unwrap();
+                private_dir(selected.join("teamarness")).unwrap();
             } else {
-                fs::create_dir(selected.join("teamarness")).unwrap();
+                private_dir(selected.join("teamarness")).unwrap();
             }
             assert!(i.apply(&plan).is_err());
             assert!(!selected.join("teamarness/SKILL.md").exists());
@@ -286,7 +305,7 @@ fn new_directory_and_recognized_update_recover_each_publication_boundary() {
 fn command_success_skill_failure_is_truthful_and_never_authorizes_access() {
     let (_t, h, selected) = setup();
     let source = h.join("source");
-    fs::write(&source, b"native candidate").unwrap();
+    write_source(&source, b"native candidate");
     let d = Sha256::digest(b"native candidate")
         .iter()
         .map(|b| format!("{b:02x}"))
@@ -325,7 +344,7 @@ fn command_success_skill_failure_is_truthful_and_never_authorizes_access() {
 fn exact_selected_output_only_no_folder_registry_or_search() {
     let (_t, h, selected) = setup();
     let other = h.join("other-harness");
-    fs::create_dir(&other).unwrap();
+    private_dir(&other).unwrap();
     fs::write(other.join("SKILL.md"), b"unrelated secret-sentinel").unwrap();
     install(&h, &selected);
     let before = fs::read(selected.join("teamarness/SKILL.md")).unwrap();
@@ -524,7 +543,7 @@ fn command_and_skill_share_one_nonwaiting_installer_owner() {
     }
     let (_t, h, selected) = setup();
     let source = h.join("source");
-    fs::write(&source, b"native candidate").unwrap();
+    write_source(&source, b"native candidate");
     let d = Sha256::digest(b"native candidate")
         .iter()
         .map(|b| format!("{b:02x}"))
@@ -600,4 +619,21 @@ fn edit_during_receipt_publication_is_preserved_and_never_reported_installed() {
         fs::read(selected.join("teamarness/SKILL.md")).unwrap(),
         b"concurrent Person edit"
     );
+}
+// Explicit owner-only modes keep fixtures independent of the process umask: Ubuntu's
+// default 0002 would otherwise create group-writable homes, folders and sources that
+// the installers correctly refuse. Tests that need unsafe modes set them explicitly.
+fn private_temp() -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .permissions(fs::Permissions::from_mode(0o700))
+        .tempdir()
+        .unwrap()
+}
+fn private_dir(path: impl AsRef<Path>) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    fs::DirBuilder::new().mode(0o700).create(path)
+}
+fn write_source(path: &Path, bytes: &[u8]) {
+    fs::write(path, bytes).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
 }

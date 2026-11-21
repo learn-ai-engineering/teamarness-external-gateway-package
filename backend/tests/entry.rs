@@ -329,7 +329,11 @@ fn copied_fixture_tmx_uses_only_explicit_child_home_and_shared_cli_logic() {
     use teamarness_generated_package_backend::managed_install::{
         Admitted, Approval, ManagedInstaller,
     };
-    let source = fixture_executable();
+    // Admit a private owner-only copy, as the Host admits Backend bytes: Cargo's output
+    // and its directories follow the build umask (group-writable under Ubuntu's 0002).
+    let source = root.join("admitted-fixture");
+    std::fs::copy(fixture_executable(), &source).unwrap();
+    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o700)).unwrap();
     let digest: String = Sha256::digest(std::fs::read(&source).unwrap())
         .iter()
         .map(|b| format!("{b:02x}"))
@@ -342,7 +346,28 @@ fn copied_fixture_tmx_uses_only_explicit_child_home_and_shared_cli_logic() {
         )
         .unwrap();
     installer.apply(&plan, Approval::Explicit).unwrap();
-    let copy = home.join(".local/bin/tmx");
+    let installed = home.join(".local/bin/tmx");
+    assert_eq!(
+        std::fs::read(&installed).unwrap(),
+        std::fs::read(&source).unwrap()
+    );
+    // This process wrote `installed` (and `source`), so it runs neither. On Linux a parallel
+    // test's spawning child can inherit a write descriptor between fork and exec, and running
+    // that file then fails with ETXTBSY. Every executable run below is made by a separate
+    // `/bin/cp` process instead, so this process never holds a write descriptor to it.
+    let cp = |from: &std::path::Path, to: &std::path::Path| {
+        let status = std::process::Command::new("/bin/cp")
+            .arg("--")
+            .args([from, to])
+            .env_clear()
+            .status()
+            .unwrap();
+        assert!(status.success());
+    };
+    let runnable = root.join("runnable");
+    std::fs::create_dir(&runnable).unwrap();
+    let copy = runnable.join("tmx");
+    cp(&installed, &copy);
     assert_eq!(
         std::fs::read(&copy).unwrap(),
         std::fs::read(&source).unwrap()
@@ -364,6 +389,7 @@ fn copied_fixture_tmx_uses_only_explicit_child_home_and_shared_cli_logic() {
         vec!["--help"],
         vec!["--version"],
         vec!["--licenses"],
+        vec!["--skill"],
     ] {
         let output = std::process::Command::new(&copy)
             .args(args)
@@ -373,6 +399,36 @@ fn copied_fixture_tmx_uses_only_explicit_child_home_and_shared_cli_logic() {
             .unwrap();
         assert!(output.status.success());
     }
+    // The skill names the canonical invoked copy, never the managed home path it was copied from.
+    let moved = root.join("agent's fixture dir");
+    std::fs::create_dir(&moved).unwrap();
+    cp(&installed, &moved.join("tmx"));
+    let expected = include_str!("../resources/teamarness/SKILL.md").replace(
+        "{{COMMAND}}",
+        &format!(
+            "'{}'\\''s fixture dir/tmx'",
+            root.join("agent").to_str().unwrap()
+        ),
+    );
+    for args in [vec!["--skill"], vec!["--tmx-cli", "--skill"]] {
+        let output = std::process::Command::new(moved.join("tmx"))
+            .args(&args)
+            .env_clear()
+            .env("TEAMARNESS_FIXTURE_HOME", &home)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stderr.is_empty());
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), expected);
+    }
+    let refused = std::process::Command::new(moved.join("tmx"))
+        .args(["--skill", "extra"])
+        .env_clear()
+        .env("TEAMARNESS_FIXTURE_HOME", &home)
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(2));
+    assert!(refused.stdout.starts_with(b"{\"error\":"));
     for missing_or_invalid in [
         None,
         Some(root.join("missing")),

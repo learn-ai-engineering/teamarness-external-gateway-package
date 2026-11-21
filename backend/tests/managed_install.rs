@@ -13,10 +13,17 @@ fn digest(bytes: &[u8]) -> String {
         .collect()
 }
 fn fixture() -> (tempfile::TempDir, PathBuf, PathBuf) {
-    let temp = tempfile::tempdir().unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    // Explicit owner-only modes keep the private home and admitted source independent of
+    // the process umask (Ubuntu's default 0002 would make both group-writable).
+    let temp = tempfile::Builder::new()
+        .permissions(fs::Permissions::from_mode(0o700))
+        .tempdir()
+        .unwrap();
     let home = temp.path().canonicalize().unwrap();
     let source = home.join("package-backend");
     fs::write(&source, b"#!/bin/sh\nprintf copied-cli").unwrap();
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o700)).unwrap();
     (temp, home, source)
 }
 fn admitted(source: &Path, version: &str, owner: &str) -> Admitted {

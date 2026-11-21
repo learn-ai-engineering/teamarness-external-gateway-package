@@ -173,7 +173,7 @@ async fn connection_truth_survives_listener_stop_skill_and_cli_history_but_detec
         .await
         .unwrap();
     assert_eq!(inspect(&mut h).await["connection"]["state"], "connected");
-    let folder = tempfile::tempdir().unwrap();
+    let folder = support::private_dir();
     let id = s
         .setup
         .register_selection(folder.path().canonicalize().unwrap())
@@ -393,8 +393,8 @@ async fn setup_collision_errors_identify_command_or_skill_without_private_metada
     let f = Fixture::new();
     let (mut h, s) = f.start().await;
     assert_eq!(apply(&mut h, "install-cli").await["phase"], "complete");
-    let folder = tempfile::tempdir().unwrap();
-    fs::create_dir(folder.path().join("teamarness")).unwrap();
+    let folder = support::private_dir();
+    support::create_private_dir(folder.path().join("teamarness")).unwrap();
     fs::write(
         folder.path().join("teamarness/SKILL.md"),
         b"unrecognized skill",

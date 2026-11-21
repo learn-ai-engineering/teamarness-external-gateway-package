@@ -365,6 +365,10 @@ async fn admitted_command_survives_observer_loss_and_revoke_with_slot_owned_unti
     barrier.entered.notified().await;
     lost.abort();
     let _ = lost.await;
+    // The Provider observes "invoke" during the admission's first poll, which still holds
+    // the Policy owner until the call is enqueued. `change` deliberately never queues (it
+    // refuses with retryable `busy`), so first await the owner through the FIFO lock.
+    policy.authenticate(&bearer).await.unwrap();
     policy.change(Change::Revoke(id)).await.unwrap();
     let mut readers = tokio::task::JoinSet::new();
     for _ in 0..12 {

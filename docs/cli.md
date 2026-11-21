@@ -1,14 +1,17 @@
 # Native CLI (interaction major 1)
 
-The single Apple Silicon macOS Backend artifact also provides native `tmx` mode.
+Each native Backend artifact (Apple Silicon macOS, or x86_64 Linux with glibc) also provides native `tmx` mode.
 No Node, npm, source checkout or interpreter is needed at runtime. It provides ordinary operations, live subscriptions and recoverable managed
-command/skill setup with native folder selection and owning-Installation refresh.
+command/skill setup with owning-Installation refresh, and native folder selection on macOS.
 No installed-access qualification is claimed.
 
 From an assembled Package Directory, use its absolute Backend executable path
-with `--tmx-cli --help` or `--tmx-cli --version`. A copy named `tmx` selects CLI
+with `--tmx-cli --help`, `--tmx-cli --version` or `--tmx-cli --skill`. A copy named `tmx` selects CLI
 mode even without arguments. The admitted executable with no arguments remains
 the Backend. Invalid arguments never enter Host stdio. `--tmx-picker` is a private native-helper entry, not a CLI command. There is no public endpoint or credential-path option.
+
+To install and connect `tmx` on a node without the desktop Configuration page,
+follow [headless onboarding](headless-onboarding.md).
 
 ```text
 tmx workspaces
@@ -22,7 +25,7 @@ tmx --workspace <id-or-exact-unique-name> subscribe <contract> <port> --major <n
 tmx --workspace <id-or-exact-unique-name> subscribe <contract> <port> --major <number> --input <file|-> --for 2m [--max-events 10]
 ```
 
-Help/version are offline. `workspaces` lists only locally configured connections,
+Help, version, licenses and skill output are offline. `workspaces` lists only locally configured connections,
 without probing or printing credentials, origin nonces, or private paths. A
 single configured Workspace is **not** a default. IDs win over exact names;
 duplicate exact names return candidate IDs. Names are last-observed metadata.
@@ -137,7 +140,7 @@ there is no daemon, model wakeup, durable replay or universal session cleanup.
 Explicitly reconnect and reconcile with current Provider guidance after a gap.
 
 Subscriptions require stdout to be a pollable pipe or terminal. Direct redirection
-such as `> events.ndjson` is unsupported: macOS regular-file writes cannot honor
+such as `> events.ndjson` is unsupported: regular-file writes cannot honor
 O_NONBLOCK and the mandatory pending-write bound. This refuses **before network**
 with exit 2, `cli.stream_stdout_unsupported` JSON and a hint on stderr; unsupported
 stdout itself is never written. Ordinary command output is unchanged. To save a
@@ -161,11 +164,16 @@ credentials in owned private OS-user files at
 `~/.local/bin/tmx`; PATH setup is optional and shell startup files are not edited.
 The portable skill must not include this private store path or credentials.
 
-Production resolves the effective OS user's home using the fixed macOS system
-utility `/usr/bin/dscacheutil -q user -a uid <effective-uid>`. HOME, cwd and public
-flags cannot redirect it. The lookup has a two-second deadline, bounded captured
-output, successful-exit/unambiguous absolute-directory checks and kill/reap on
-failure. Descriptor-relative no-follow traversal then validates ownership and
+Production resolves the effective OS user's home from the OS account database,
+never from `HOME`. On macOS it runs the fixed system utility
+`/usr/bin/dscacheutil -q user -a uid <effective-uid>`. On Linux it runs
+`/usr/bin/getent passwd <effective-uid>` with an empty environment and accepts
+exactly one passwd line of exactly seven colon-separated fields whose UID field
+equals the effective UID and whose home field is absolute and control-free.
+HOME, cwd and public flags cannot redirect either lookup. Both have a two-second
+deadline, bounded captured output, successful-exit/unambiguous absolute-directory
+checks and kill/reap on failure; any failure is `cli.home_unavailable`, with no
+fallback. Descriptor-relative no-follow traversal then validates ownership and
 unsafe write permissions. Existing safe intermediate modes remain unchanged;
 new private directories are 0700 and records/lock are owned single-link 0600.
 There are at most 128 records of at most 16 KiB, named deterministically by
@@ -248,7 +256,7 @@ external cleanup after inspection; no false rollback/cleanup claim is made.
 A command can be published while skill publication fails; no access was authorized.
 
 The typed Backend coordinator supplies explicit consent and actual activation/
-reload refresh through an injected-home seam. Both mount views use the native picker and coordinator. Tests never invoke setup against the ordinary OS home. Acquired
+reload refresh through an injected-home seam. Both mount views use the coordinator, and on macOS the native picker; other targets refuse the picker with `external_gateway.picker_unavailable`. Tests never invoke setup against the ordinary OS home. Acquired
 native output execution/update and real harness skill discovery remain M1/M3/M4.
 
 
@@ -345,6 +353,48 @@ Installed checks require the disposable OS account/home and M1–M5 observations
 provenance offline, before home lookup, sockets or AppKit. Like help/version it
 needs no Workspace and accepts no other options. The same native artifact retains
 these notices after managed copy or Package Directory movement.
+
+### Manual skill installation with `tmx --skill`
+
+`tmx --skill` (or `<executable> --tmx-cli --skill`) prints the portable skill to
+stdout, offline. It does no home lookup, client-store read, network or Host
+work, and does not start AppKit. Like `--licenses`, it accepts no other options.
+The output is the same rendering that selected-folder publication writes, byte
+for byte, for the same command path. It contains no credential, default
+Workspace, private-store path or copied Provider contract.
+
+The skill names the running executable's own canonical absolute path as its one
+shell-quoted command. Run it from the installed managed copy, so that the skill
+names that copy:
+
+```sh
+(
+  umask 077
+  dir="$HOME/<agent skill folder>/teamarness"
+  mkdir -p "$dir" &&
+    ~/.local/bin/tmx --skill > "$dir/SKILL.md.tmp" &&
+    mv "$dir/SKILL.md.tmp" "$dir/SKILL.md"
+)
+```
+
+Replace `$HOME/<agent skill folder>`, inside the quotes, with the skill folder's path under your
+home, or with its absolute path. A quoted `~` does not expand, so do not use it
+inside the quotes.
+
+The subshell's `umask 077` keeps new folders and the new file owner-only without
+changing the calling shell's umask; existing folders keep their modes. The
+commands are chained with `&&`, and the skill is written to `SKILL.md.tmp`
+before it replaces `SKILL.md`. If `tmx --skill` fails, the chain stops and any
+existing `SKILL.md` is unchanged; delete `SKILL.md.tmp` and run it again.
+
+If you run it from another copy, such as a Package Directory's Backend
+executable, the skill names that copy instead. A manually written file has no
+receipt, so the app's skill publication treats it as unrecognized and refuses
+to replace it. Rerun the command after a CLI update, so the text matches the
+new version, and after moving the executable. If the executable
+path cannot be quoted safely (not absolute, not UTF-8, longer than 4096 bytes or
+containing a control character), it refuses with `cli.skill_unavailable` and
+exit 2.
 
 ### Independent internal CLI action and current facts
 

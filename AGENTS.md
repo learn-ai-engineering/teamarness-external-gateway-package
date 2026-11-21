@@ -33,7 +33,7 @@ Package UI
 
 `ui-contract.json` defines the requests that may cross this path. Treat it as the shared boundary between the UI and Backend. Change the contract before implementing a new request on either side.
 
-This Package consumes only `teamarness.workspace-context` 1.0, `teamarness.package-ports` 3.0 and `teamarness.membership` 1.0. It has eager activation, main and settings views, closed typed configuration requests and `external-gateway.status.watch`. It provides no Ports and declares no known consumed Ports. It targets `aarch64-apple-darwin`. The Backend requires process 1.1 and serves bounded authenticated IPv4 HTTP and confirmed NDJSON; the UI provides main/settings views, bounded catalog controls, one-time tokens and secret-free onboarding.
+This Package consumes only `teamarness.workspace-context` 1.0, `teamarness.package-ports` 3.0 and `teamarness.membership` 1.0. It has eager activation, main and settings views, closed typed configuration requests and `external-gateway.status.watch`. It provides no Ports and declares no known consumed Ports. It supports the targets `aarch64-apple-darwin` and `x86_64-unknown-linux-gnu`. The source manifest declares a placeholder Backend for each, and a native-only build assembles a Package Directory that declares only the target it built (`scripts/targets.mjs`). The Backend requires process 1.1 and serves bounded authenticated IPv4 HTTP and confirmed NDJSON; the UI provides main/settings views, bounded catalog controls, one-time tokens and secret-free onboarding.
 
 ## Project map
 
@@ -48,9 +48,12 @@ This Package consumes only `teamarness.workspace-context` 1.0, `teamarness.packa
 | `ui/src/styles.ts` | Holds this Package's CSS, adopted into the mount and removed on unmount. |
 | `ui/src/contract.generated.ts` | Generated request and response types. Regenerate it; never edit it. |
 | `ui/src/index.test.ts` | Exercises UI behavior with the UI SDK's fake Package client. |
-| `scripts/assemble-package.mjs` | Assembles final Backend, UI, contract, and manifest bytes into `dist/`. |
-| `scripts/validate-dist.mjs` | Applies Package Admission's rules to `dist/` and smoke-launches the Backend. |
+| `scripts/build-package.mjs` | Runs `npm run build`: selects the native target, then builds, assembles and validates it. |
+| `scripts/targets.mjs` | Lists the supported Backend targets, parses the shared `--target <triple>` argument, reads the native target from `rustc -vV` (or `$RUSTC`), and refuses a non-native or unsupported target. |
+| `scripts/assemble-package.mjs` | Assembles final Backend, UI, contract, and manifest bytes for one native target into `dist/`. Imported by `build-package.mjs` and its tests; it has no command line of its own. |
+| `scripts/validate-dist.mjs` | Applies Package Admission's rules to `dist/` for the native target, smoke-launches the Backend, then smoke-tests its picker and CLI entry modes. |
 | `scripts/verify-vendor.mjs` | Fails when a vendored SDK file no longer matches recorded provenance. |
+| `scripts/headless/external-gateway-setup` | Headless answers-file setup (Bash plus `python3 -I`). It drives existing Host operator commands and Gateway requests, read-first and with no retries. The build copies it to `dist/external-gateway-setup`, beside the Package Directory and never inside it. `scripts/headless-setup.test.mjs` drives it against `scripts/headless/fake-host.py`. The answers file is the whole tool selection. The template lists every Provider tool by name; with `TEAMARNESS_CHECKOUT` set, the tests compare that list with the Providers' `ports.json`. |
 | `vendor/teamarness/` | Contains the generated copies of the Package Process Protocol and SDK source used by this project. |
 | `teamarness-authoring.json` | Records template, protocol, UI host, SDK provenance, and request namespace information. |
 | `Cargo.lock` and `package-lock.json` | Lock this project's Rust and JavaScript dependency graphs. Commit both. |
@@ -148,12 +151,13 @@ Package source, trust, Workspace enablement, synchronization, sharing, networkin
 
 Do not edit `dist/` after assembly. Any byte change makes the manifest declaration stale.
 
-The assembler copies one Backend executable, `ui/dist/index.js`, and `ui-contract.json`. The manifest declares no assets. Keep the UI inside the single ESM bundle unless the product needs a different artifact shape.
+The assembler copies one Backend executable, for the native target, `ui/dist/index.js`, and `ui-contract.json`. The manifest declares no assets. Keep the UI inside the single ESM bundle unless the product needs a different artifact shape.
 
 If you add UI assets, another Backend, or another target platform, update all of the following together:
 
 - `teamarness.package.json`;
 - `scripts/assemble-package.mjs`;
+- `scripts/targets.mjs` (`supportedTargets`), for another target platform;
 - build dependencies and commands; and
 - tests that verify final paths, permissions, sizes, and digests.
 
@@ -241,7 +245,7 @@ Corrected full-access Phase 2 refreshes the four canonical vendor trees once fro
 
 `streams.rs` owns eight pending/active subscriptions separately from twelve calls. Confirmed SDK methods precede HTTP 200/ready. Legacy/unconfirmed setup refuses clearly, never fabricates ready. Policy owns token-generation/exact-tool registration and every output admission. Idle permission/lifecycle loss signals streams before drain; failed storage closes all. Pending observer loss retains capacity through SDK terminal and late success closes. Use recv_with_credit with one waiting frame plus one writer-owned frame, 256 KiB original values plus 4 KiB framing, five-second pending-write flush and 15-second heartbeat. No owner is held over socket/credit/cleanup waits; no detached handles, durable replay, automatic reconnect or model wakeup. Already-admitted bounded bytes may drain. Provider Markdown stays unchanged; structured runtime.guide remains callable. Native Epic/Collection prerequisites and Provider versions/conflicts stay Provider-owned. Final real-Host qualification and Don-owned corrected-plan M1–M4 remain pending.
 
-`cli/` owns interaction major 1, raw-byte JSON/NDJSON and numeric-loopback Hyper client access. `cli/stream.rs` serializes one observation, validated ready and terminal selection; descriptor-level nonblocking stdout has one bounded pending line, a five-second write budget and no detached writer. Subscriptions require readiness-registered pipe/terminal stdout; regular/non-pollable output refuses before network (exit 2, stderr JSON/hint), never silently falling back to blocking disk I/O. Continuous mode has no CLI lifetime cap; the 45-second valid-frame liveness clock pauses under local output backpressure. `client_store.rs` owns private format-1 connection files, origin conflicts and cross-process publication. Production home lookup uses bounded fixed macOS dscacheutil, never HOME or a public path flag; tests inject physical homes through constructors or the unassembled fixture example. CLI help/version do not resolve home, start Host stdio, listener or AppKit. `setup.rs` owns recoverable managed access coordination; Policy alone owns authorization. `backend/build.rs` embeds the Package manifest version; Cargo crate version, CLI major and store format are independent.
+`cli/` owns interaction major 1, raw-byte JSON/NDJSON and numeric-loopback Hyper client access. `cli/stream.rs` serializes one observation, validated ready and terminal selection; descriptor-level nonblocking stdout has one bounded pending line, a five-second write budget and no detached writer. Subscriptions require readiness-registered pipe/terminal stdout; regular/non-pollable output refuses before network (exit 2, stderr JSON/hint), never silently falling back to blocking disk I/O. Continuous mode has no CLI lifetime cap; the 45-second valid-frame liveness clock pauses under local output backpressure. `client_store.rs` owns private format-1 connection files, origin conflicts and cross-process publication. Production home lookup is a bounded (2 s) fixed OS account query: macOS `/usr/bin/dscacheutil`, Linux `/usr/bin/getent passwd <euid>` with an empty environment. Neither reads HOME or accepts a public path flag; any failure is `cli.home_unavailable` with no fallback (the Backend maps it to `external_gateway.home_unavailable`, which fails activation). Tests inject physical homes through constructors or the unassembled fixture example. CLI help/version/licenses/skill do not resolve home, start Host stdio, listener or AppKit. `setup.rs` owns recoverable managed access coordination; Policy alone owns authorization. `backend/build.rs` embeds the Package manifest version; Cargo crate version, CLI major and store format are independent.
 
 
 `managed_install.rs` owns recognized executable/skill publication safety shared by
@@ -294,16 +298,20 @@ mount-scoped leases. Its empty-input setup subscription establishes promptly;
 there is no browsing lifetime limit. The one selected event ends native work,
 not the selection lease: close/reselect/unmount/lifecycle invalidates selections
 and unaccepted plans, while accepted apply remains independently owned. Child
-kill/reap and lifecycle joins are explicit. `picker_helper.rs` dispatches before
-Tokio, initializes AppKit and runs synchronous RFD on the OS main thread; its
-fixed private request pipe is also the parent-EOF lifeline. Keep 4-KiB path,
-8-KiB frame/stderr and five-second terminal/cleanup budgets, no debug leakage or
-arbitrary helper/script arguments. `picker-fixture` is unassembled fault/lifeline
-evidence, never a claim of actual AppKit or installed behavior. Package version
-1.1.0 is manifest-owned; CLI/store major 1, process 1.1, capabilities and artifact
-shape remain independent. Native focus/installed M1–M5 remain Don-owned pending.
+kill/reap and lifecycle joins are explicit. On macOS `picker_helper.rs` dispatches
+before Tokio, initializes AppKit and runs synchronous RFD on the OS main thread; its
+fixed private request pipe is also the parent-EOF lifeline. Other targets have no
+native chooser: `Picker::choose` refuses `choose-skill-folder` before capacity or
+spawn with non-retryable `external_gateway.picker_unavailable`, and the helper
+emits `picker_failed`. Keep 4-KiB path, 8-KiB frame/stderr and five-second
+terminal/cleanup budgets, no debug leakage or arbitrary helper/script arguments.
+`picker-fixture` is unassembled fault/lifeline evidence, never a claim of actual
+AppKit or installed behavior. Package version 1.1.0 is manifest-owned; CLI/store
+major 1, process 1.1, capabilities and artifact shape remain independent.
+Native focus/installed M1–M5 remain Don-owned pending.
 `cli::THIRD_PARTY_NOTICES_JSON` embeds literal dependency notices and source provenance;
-`tmx --licenses` retrieves them offline before runtime/home/network/AppKit. Preserve
+`tmx --licenses` retrieves them offline before runtime/home/network/AppKit, as
+`tmx --skill` prints the portable skill for manual installation. Preserve
 upstream text/checksums when changing native dependencies; assembled checks compare
 the entire resource in both CLI entry modes, without adding an asset category.
 
@@ -353,9 +361,11 @@ consents to the exact recognized output change; no second CLI confirmation is
 shown. Collisions remain refusal. Progress, errors and independently dismissible
 results belong above the controls in each CLI/connection/skill section. Required
 command publication in a valid already accepted pending Repair retains its
-targeted confirmation to avoid a recovery deadlock; only
-Repair can resume those reserved outputs, never the independent CLI action. Install skill… opens the native chooser and selection immediately
-prepares/applies only the skill, holding its lease through acceptance. Cancel and
+targeted confirmation to avoid a recovery deadlock; only Repair can resume those
+reserved outputs, never the independent CLI action. On macOS, Install skill…
+opens the native chooser and selection immediately prepares/applies only the
+skill, holding its lease through acceptance. On other targets the chooser
+request refuses with `external_gateway.picker_unavailable`. Cancel and
 stale/unmounted observations never apply; accepted work still outlives the view.
 Current connection facts never come from operation receipts or listener running
 state. Manual token one-time-secret cleanup and explicit denial recovery remain

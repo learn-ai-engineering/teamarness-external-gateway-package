@@ -10,7 +10,14 @@ Native ordinary/streaming CLI access is also embedded in the same executable; se
 
 ## Build and check
 
-Use Rust 1.99.1 and Node 24.20.0 from this standalone project:
+Use Rust 1.99.1 and Node 24.20.0 or later from this standalone project. The source manifest declares one placeholder Backend for each supported target:
+
+| Machine | Rust target |
+|---|---|
+| macOS on Apple Silicon | `aarch64-apple-darwin` |
+| Linux on x86_64 with glibc | `x86_64-unknown-linux-gnu` |
+
+On Linux, install Rust through rustup so that `rust-toolchain.toml` selects 1.99.1, install Node 24.20.0 or later, and install a C toolchain that provides the system linker (`build-essential` on Ubuntu). The Ubuntu 26.04 qualification VM uses its installed Node 26. The automated checks (`npm run validate`, `typecheck`, `lint`, `test` and `build`) pass natively on Ubuntu 26.04 x86_64; qualification against a real headless Host is pending, so these prerequisites do not claim a Host-qualified Linux installation.
 
 ```sh
 npm ci
@@ -22,6 +29,15 @@ npm test
 npm run build
 git diff --check
 ```
+
+The build is native only. It builds for the target that `rustc -vV` (or `$RUSTC -vV`) reports as its host, and the assembled Package Directory declares only that target's Backend. `npm run build -- --target <triple>` confirms the target: it refuses any other target, or any other argument, with exit status 2 before it runs Cargo or changes `dist/`. Cargo always builds with that explicit `--target`, and the assembler takes the Backend from `<triple>/release/` inside Cargo's target directory (`target/` unless `CARGO_TARGET_DIR` or `build.target-dir` says otherwise), so a Cargo `build.target` setting cannot leave a stale binary in its place. Cross-compilation is not supported, so build each target on its own machine.
+
+Each target ships a slightly different set of third-party components:
+
+- Only `aarch64-apple-darwin` ships the native folder chooser and its dependencies: `rfd` 0.16.1, `objc2` 0.6.5, `objc2-encode` 4.1.0, `objc2-foundation` 0.3.2 and `block2` 0.6.2 (MIT); `objc2-app-kit` 0.3.2, `objc2-core-foundation` 0.3.2 and `dispatch2` 0.3.1 (Zlib OR Apache-2.0 OR MIT); `raw-window-handle` 0.6.2 (MIT OR Apache-2.0 OR Zlib); and `log` 0.4.35 (MIT OR Apache-2.0).
+- Only `x86_64-unknown-linux-gnu` ships `linux-raw-sys` 0.12.1 (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT), the Linux backend of `rustix`.
+
+The embedded notices that `tmx --licenses` prints cover the union of both targets, so a given binary may not contain every listed component. To list the full set for one target, run `cargo tree --locked -p teamarness-generated-package-backend -e normal --target <triple>`.
 
 The build performs locked release compilation, UI assembly, final manifest/digest validation and a Backend smoke handshake. `npm test` includes vendor integrity, exact direct pins, contract/generated-type checks, locked workspace Rust tests, UI tests and assembler tests. A smoke handshake is not an HTTP or real-Host proof.
 
@@ -50,6 +66,8 @@ Native Packages run as the current OS user. This is not a sandbox or protection 
 Main and Shell Configuration share the flat Gateway, Packages and Agent setup controls. Configuration adds token management below the Shell-owned header/tabs; no imitation tabs or editable-port control are rendered. The main gear requests only this Package’s own Configuration through optional mount navigation; older Hosts show a disabled gear with an update explanation. Enable the listener; its numeric URL appears only after bind and durable commit. If the saved port is occupied, dismissing the error changes presentation only: free that same port and explicitly retry. No fallback port is selected. Package rows group contracts by Provider on each bounded page. Enable reviewed displayed contracts before expanding their tools, then choose each exact tool separately (Read, Write, Streaming query or Event). New tools are off. A guide is included automatically; missing guides cannot be enabled. Review changed schema/Provider/major choices explicitly. Disabling a Package requires confirmation and removes all its saved tool choices; re-enabling does not restore them. Unavailable saved choices can be removed with Disable Package; Host-only unavailable selections have an exact removal action.
 
 Create a labeled token and transfer its one-time display to your outside client's local secret mechanism. Dismiss it when done; leaving settings or unmounting clears it. Lost create/regenerate responses require regeneration. All tokens share current tool scope; labels do not identify Principals. Calls that passed final gateway local admission may still be sent to the Host and finish after disable/revoke/regenerate succeeds, including commands waiting inside the SDK. Later admissions use the new policy. Use the external agent's own stop control to stop its work; revocation is not cancellation.
+
+On a headless Linux Host, follow [Install External Gateway on a headless Linux Host](docs/headless-install.md) to build, install and set up each Workspace. [Headless onboarding](docs/headless-onboarding.md) explains each request. It gives the same order of operations as Package requests with exact JSON bodies, and shows how to verify, rotate, disconnect and repair.
 
 Both views include expandable [generic onboarding](docs/onboarding.md), the same Markdown served by authenticated `/v1/onboarding`. Save this guidance without a credential. Discover identifiers, complete schemas and fresh guide bytes before calling. No Backlog-specific client adapter or model setup is needed. The 12-operation bound counts outstanding gateway SDK operations, not simultaneous Provider executions; timeouts do not require a gateway restart or prove execution stopped. At most one delayed retry is permitted only for retryable ordinary reads when current Provider guidance permits; never automatically replay catalog/auth/policy/schema refusals or uncertain outcomes.
 
@@ -83,7 +101,8 @@ in-memory, not a new credential Journal/Completed form. No uninstall is provided
 Preview is read-only, accepts only an opaque folder selection, expires in ten
 minutes and is limited to four plans. Apply rechecks consent and returns an
 owned operation ID; cancelling a UI observer does not cancel accepted work.
-The native folder picker supplies a bounded mount-scoped selection lease; both views use the same coordinator controls.
+On macOS, the native folder picker supplies a bounded mount-scoped selection lease; other targets refuse
+it with `external_gateway.picker_unavailable`. Both views use the same coordinator controls.
 
 `setup.inspect` separately observes current CLI recognition/candidate change,
 Workspace authority/local publication, and pending/invalid credential recovery.
@@ -138,8 +157,9 @@ repair retains intact credentials. Revoked/disconnected access is not connected.
 Pending/invalid/conflicting state is shown separately from historical results.
 
 The optional skill helps an agent discover and use live Workspace tools. With
-the current CLI installed, **Install skill…** opens the native folder chooser;
+the current CLI installed on macOS, **Install skill…** opens the native folder chooser;
 confirming the folder installs only the skill, and Cancel installs nothing.
+On other targets, install it by hand with `tmx --skill`.
 No folder is attached to credential actions. Connect, rotation and skill
 installation refuse any implicit CLI change: use Install/Update CLI first.
 Repair explicitly resumes previously accepted unfinished work. If it requires

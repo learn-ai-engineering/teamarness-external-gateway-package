@@ -293,7 +293,7 @@ impl LiveFixture {
         use support::*;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let home = tempfile::tempdir().unwrap();
+        let home = private_home();
         let mut c = connection("workspace-a", "Acme");
         c.port = listener.local_addr().unwrap().port();
         teamarness_generated_package_backend::client_store::ClientStore::for_home(
@@ -650,6 +650,28 @@ async fn regular_stdout_refuses_before_network_and_preserves_existing_file_bytes
     assert_eq!(error["error"]["code"], "cli.stream_stdout_unsupported");
     assert!(stderr.contains("tee"));
 }
+/// macOS BSD `script` takes the command as trailing arguments.
+#[cfg(target_os = "macos")]
+fn pty_command(program: &std::path::Path, args: &[String]) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new("/usr/bin/script");
+    command.args(["-q", "/dev/null"]).arg(program).args(args);
+    command
+}
+/// util-linux `script` takes one shell command string; every word is single-quoted and
+/// the interpreting shell is fixed, so neither SHELL nor word content changes the argv.
+#[cfg(not(target_os = "macos"))]
+fn pty_command(program: &std::path::Path, args: &[String]) -> tokio::process::Command {
+    let quote = |word: &str| format!("'{}'", word.replace('\'', "'\\''"));
+    let line = std::iter::once(quote(program.to_str().expect("UTF-8 fixture path")))
+        .chain(args.iter().map(|a| quote(a)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut command = tokio::process::Command::new("/usr/bin/script");
+    command
+        .args(["-q", "-e", "-c", &line, "/dev/null"])
+        .env("SHELL", "/bin/sh");
+    command
+}
 #[tokio::test]
 async fn real_terminal_stdout_supports_readiness_registered_streaming() {
     use support::*;
@@ -658,14 +680,11 @@ async fn real_terminal_stdout_supports_readiness_registered_streaming() {
         ndjson(&format!("{READY}{END}")),
     ])
     .await;
-    // macOS script supplies a genuine PTY; it is a test OS adapter, not a shipped helper.
+    // script supplies a genuine PTY; it is a test OS adapter, not a shipped helper.
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(7),
         spawn_captured(
-            tokio::process::Command::new("/usr/bin/script")
-                .args(["-q", "/dev/null"])
-                .arg(fixture_executable())
-                .args(words(&["--until-cancelled"]))
+            pty_command(&fixture_executable(), &words(&["--until-cancelled"]))
                 .env(
                     "TEAMARNESS_FIXTURE_HOME",
                     f.home.path().canonicalize().unwrap(),

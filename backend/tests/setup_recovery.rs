@@ -562,7 +562,7 @@ async fn required_output_faults_leave_no_verifier_and_repair_only_recognized_byt
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn skill_failure_after_command_publication_and_user_edit_never_activate_access() {
     let f = Fixture::new();
-    let folder = tempfile::tempdir().unwrap();
+    let folder = support::private_dir();
     let (p, release) = pause(Transition::Outputs);
     let mut e = f.environment();
     e.setup_fault = Some(p.clone());
@@ -723,7 +723,7 @@ async fn every_private_journal_update_fault_requires_reconciliation_not_new_auth
     ] {
         for nth in 1..=5 {
             let f = Fixture::new();
-            let folder = tempfile::tempdir().unwrap();
+            let folder = support::private_dir();
             let mut e = f.environment();
             e.setup_fault = Some(Arc::new(Nth {
                 at: stage,
