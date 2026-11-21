@@ -101,7 +101,8 @@ in-memory, not a new credential Journal/Completed form. No uninstall is provided
 Preview is read-only, accepts only an opaque folder selection, expires in ten
 minutes and is limited to four plans. Apply rechecks consent and returns an
 owned operation ID; cancelling a UI observer does not cancel accepted work.
-The native folder picker supplies a bounded mount-scoped selection lease; both views use the same coordinator controls.
+On macOS, the native folder picker supplies a bounded mount-scoped selection lease; other targets refuse
+it with `external_gateway.picker_unavailable`. Both views use the same coordinator controls.
 
 `setup.inspect` separately observes current CLI recognition/candidate change,
 Workspace authority/local publication, and pending/invalid credential recovery.
@@ -156,8 +157,9 @@ repair retains intact credentials. Revoked/disconnected access is not connected.
 Pending/invalid/conflicting state is shown separately from historical results.
 
 The optional skill helps an agent discover and use live Workspace tools. With
-the current CLI installed, **Install skill…** opens the native folder chooser;
+the current CLI installed on macOS, **Install skill…** opens the native folder chooser;
 confirming the folder installs only the skill, and Cancel installs nothing.
+On other targets, install it by hand with `tmx --skill`.
 No folder is attached to credential actions. Connect, rotation and skill
 installation refuse any implicit CLI change: use Install/Update CLI first.
 Repair explicitly resumes previously accepted unfinished work. If it requires

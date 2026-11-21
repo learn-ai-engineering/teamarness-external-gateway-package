@@ -306,7 +306,8 @@ emits `picker_failed`. Keep 4-KiB path, 8-KiB frame/stderr and five-second
 terminal/cleanup budgets, no debug leakage or arbitrary helper/script arguments.
 `picker-fixture` is unassembled fault/lifeline evidence, never a claim of actual
 AppKit or installed behavior. Package version 1.1.0 is manifest-owned; CLI/store
-major 1, process 1.1, capabilities and artifact shape remain independent. Native focus/installed M1–M5 remain Don-owned pending.
+major 1, process 1.1, capabilities and artifact shape remain independent.
+Native focus/installed M1–M5 remain Don-owned pending.
 `cli::THIRD_PARTY_NOTICES_JSON` embeds literal dependency notices and source provenance;
 `tmx --licenses` retrieves them offline before runtime/home/network/AppKit, as
 `tmx --skill` prints the portable skill for manual installation. Preserve

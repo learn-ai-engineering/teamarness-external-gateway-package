@@ -2,7 +2,7 @@
 
 Each native Backend artifact (Apple Silicon macOS, or x86_64 Linux with glibc) also provides native `tmx` mode.
 No Node, npm, source checkout or interpreter is needed at runtime. It provides ordinary operations, live subscriptions and recoverable managed
-command/skill setup with native folder selection and owning-Installation refresh.
+command/skill setup with owning-Installation refresh, and native folder selection on macOS.
 No installed-access qualification is claimed.
 
 From an assembled Package Directory, use its absolute Backend executable path
@@ -256,7 +256,7 @@ external cleanup after inspection; no false rollback/cleanup claim is made.
 A command can be published while skill publication fails; no access was authorized.
 
 The typed Backend coordinator supplies explicit consent and actual activation/
-reload refresh through an injected-home seam. Both mount views use the native picker and coordinator. Tests never invoke setup against the ordinary OS home. Acquired
+reload refresh through an injected-home seam. Both mount views use the coordinator, and on macOS the native picker; other targets refuse the picker with `external_gateway.picker_unavailable`. Tests never invoke setup against the ordinary OS home. Acquired
 native output execution/update and real harness skill discovery remain M1/M3/M4.
 
 
@@ -377,7 +377,7 @@ names that copy:
 )
 ```
 
-Replace `"$HOME/<agent skill folder>"` with the skill folder's path under your
+Replace `$HOME/<agent skill folder>`, inside the quotes, with the skill folder's path under your
 home, or with its absolute path. A quoted `~` does not expand, so do not use it
 inside the quotes.
 
