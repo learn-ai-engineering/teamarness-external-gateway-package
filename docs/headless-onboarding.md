@@ -8,15 +8,16 @@ headless node, you send each Package request yourself.
 The sequence below is tested by `backend/tests/headless_onboarding.rs`. That
 test runs the real Backend in the SDK test harness with a private test home, a
 scripted Provider and an installed fixture copy of `tmx`. It is not evidence of
-a real Host. The real-Host run of this guide is pending.
+a real Host. On 2026-11-21 the sequence was also run through a real headless
+Host on Ubuntu 26.04 x86_64, in two Workspaces.
 
 ## Prerequisites
 
 - The Package `dev.teamarness.external-gateway` is registered and enabled in
   the Workspace.
 - The Package Backend is running for that Workspace.
-- You can send Package requests to it. Until the Host defines its operator
-  command, see [Host command wrapper (planned, unverified)](#host-command-wrapper-planned-unverified).
+- You can send Package requests to it through the Host's operator command.
+  See [Send requests through the Host](#send-requests-through-the-host).
 - The Provider Package whose tools you want to expose is enabled in the same
   Workspace.
 - The Backend's effective UID resolves to an absolute home directory through
@@ -250,11 +251,11 @@ The skill contains no credential. Rerun the command after a CLI update. See
 | `external_gateway.connection_origin_conflict` | Another Installation or profile owns this Workspace's local connection. | Disconnect from the original profile. See [CLI usage and client custody](cli.md#credential-custody). |
 | `external_gateway.output_collision` | A file at the command path is not a recognized install. | Inspect and remove or move the file yourself, then preview again. |
 | `external_gateway.output_consent_required` | The command needs an explicit update. | Preview and apply `install-cli`. |
-| `external_gateway.output_unsafe` | A directory on the output path, or on the path of the Backend executable that setup copies, is unsafe: it is group- or world-writable, or it is owned by another user. The output path runs through the home directory and its ancestors, `~/.local`, `~/.local/bin`, `~/.local/share`, `~/.local/share/teamarness` and `~/.local/share/teamarness/external-gateway`. The source path is the running Backend executable inside the Package Directory that the Host registered, and every directory from `/` down to that executable is checked, for example `~/.local/lib` and `~/.local/lib/teamarness-packages` when you stage the Package there. A symbolic link anywhere on either path is also refused. Only `root`-owned ancestors of the home directory, or of the directory that holds the executable, may be owned by another user, and a `root`-owned ancestor with the sticky bit, such as `/tmp`, may be writable by others. The home directory and every directory under it that setup uses must be owned by you. The executable itself must not be group- or world-writable. A group-writable directory is common when it was created under Ubuntu's default `0002` umask. `setup.inspect` reports this code in `cli.issue`, with `cli.state` `blocked`. `setup.preview` fails with it for `install-cli`, and for `connect`, `rotate`, `repair` and `install-skill` when the directory became unsafe after the Backend activated. `disconnect` does not preview the command: it fails with `external_gateway.client_store_invalid` instead, or succeeds when only `~/.local/bin` is unsafe. If a directory on the setup state path was already unsafe when the Backend activated, credential intents fail with `external_gateway.setup_state_invalid` instead; see that row. | Fix the ownership and modes of each such directory. A directory under the home that another user owns must be returned to you, for example with `sudo chown <you> <dir>`. Run `chmod go-w <dir>` on the home directory, `~/.local`, `~/.local/bin` and `~/.local/share`, and on each directory above the Backend executable in the registered Package Directory, for example `~/.local/lib`. A directory created under Ubuntu's default `0002` umask, for example by `mkdir -p`, is group-writable. Do not change files inside the Package Directory: the Host verifies their bytes and declared modes. Run `chmod 700 <dir>` on `~/.local/share/teamarness`, `~/.local/share/teamarness/external-gateway` and, if they exist, its `managed` and `setup` folders, which must have mode exactly `0700`. Then reload the Package through the Host. The headless Host has not defined its reload command yet; see [Host command wrapper (planned, unverified)](#host-command-wrapper-planned-unverified). Then inspect and preview again. |
-| `external_gateway.client_store_invalid` | The private client store under `~/.local/share/teamarness/external-gateway/` is unsafe or unreadable. For example, the home directory, `~/.local` or `~/.local/share` is not owned by you or is group- or world-writable, or `~/.local/share/teamarness` or `~/.local/share/teamarness/external-gateway` is not owned by you or does not have mode exactly `0700`. `setup.inspect` reports it as `connection.issue`. | Fix the ownership and modes as for `output_unsafe`. Then reload the Package through the Host. The headless Host has not defined its reload command yet; see [Host command wrapper (planned, unverified)](#host-command-wrapper-planned-unverified). Then inspect and preview again. |
-| `external_gateway.setup_state_invalid` | When the Backend activated, it had no unfinished operation loaded and could not read or recover its setup state under `~/.local/share/teamarness/external-gateway/setup`. There are two causes. A directory on that path was unsafe: the home directory or one of its ancestors, `~/.local`, `~/.local/share`, `~/.local/share/teamarness`, `~/.local/share/teamarness/external-gateway` or `setup`, which must have mode exactly `0700`. Or a state file in `setup` is not valid. Until the Package is reloaded, every `setup.preview` except `install-cli` fails with this code. After you fix an unsafe directory, `setup.inspect` can report `recovery.state` `none`, but the refusal stays until the reload. When a state file is not valid, `setup.inspect` reports `recovery.state` `invalid`, and a reload fails the same way. | For an unsafe directory, fix the ownership and modes as for `output_unsafe`. Then reload the Package through the Host. The headless Host has not defined its reload command yet; see [Host command wrapper (planned, unverified)](#host-command-wrapper-planned-unverified). Then inspect and preview again. For a state file that is not valid, do not edit, move or delete it. Only `install-cli` remains available. Report the problem with the `setup.inspect` output. |
+| `external_gateway.output_unsafe` | A directory on the output path, or on the path of the Backend executable that setup copies, is unsafe: it is group- or world-writable, or it is owned by another user. The output path runs through the home directory and its ancestors, `~/.local`, `~/.local/bin`, `~/.local/share`, `~/.local/share/teamarness` and `~/.local/share/teamarness/external-gateway`. The source path is the running Backend executable inside the Package Directory that the Host registered, and every directory from `/` down to that executable is checked, for example `~/.local/lib` and `~/.local/lib/teamarness-packages` when you stage the Package there. A symbolic link anywhere on either path is also refused. Only `root`-owned ancestors of the home directory, or of the directory that holds the executable, may be owned by another user, and a `root`-owned ancestor with the sticky bit, such as `/tmp`, may be writable by others. The home directory and every directory under it that setup uses must be owned by you. The executable itself must not be group- or world-writable. A group-writable directory is common when it was created under Ubuntu's default `0002` umask. `setup.inspect` reports this code in `cli.issue`, with `cli.state` `blocked`. `setup.preview` fails with it for `install-cli`, and for `connect`, `rotate`, `repair` and `install-skill` when the directory became unsafe after the Backend activated. `disconnect` does not preview the command: it fails with `external_gateway.client_store_invalid` instead, or succeeds when only `~/.local/bin` is unsafe. If a directory on the setup state path was already unsafe when the Backend activated, credential intents fail with `external_gateway.setup_state_invalid` instead; see that row. | Fix the ownership and modes of each such directory. A directory under the home that another user owns must be returned to you, for example with `sudo chown <you> <dir>`. Run `chmod go-w <dir>` on the home directory, `~/.local`, `~/.local/bin` and `~/.local/share`, and on each directory above the Backend executable in the registered Package Directory, for example `~/.local/lib`. A directory created under Ubuntu's default `0002` umask, for example by `mkdir -p`, is group-writable. Do not change files inside the Package Directory: the Host verifies their bytes and declared modes. Run `chmod 700 <dir>` on `~/.local/share/teamarness`, `~/.local/share/teamarness/external-gateway` and, if they exist, its `managed` and `setup` folders, which must have mode exactly `0700`. Then reload the Package through the Host with `packages reload --package dev.teamarness.external-gateway`; see [Send requests through the Host](#send-requests-through-the-host). Then inspect and preview again. |
+| `external_gateway.client_store_invalid` | The private client store under `~/.local/share/teamarness/external-gateway/` is unsafe or unreadable. For example, the home directory, `~/.local` or `~/.local/share` is not owned by you or is group- or world-writable, or `~/.local/share/teamarness` or `~/.local/share/teamarness/external-gateway` is not owned by you or does not have mode exactly `0700`. `setup.inspect` reports it as `connection.issue`. | Fix the ownership and modes as for `output_unsafe`. Then reload the Package through the Host with `packages reload --package dev.teamarness.external-gateway`; see [Send requests through the Host](#send-requests-through-the-host). Then inspect and preview again. |
+| `external_gateway.setup_state_invalid` | When the Backend activated, it had no unfinished operation loaded and could not read or recover its setup state under `~/.local/share/teamarness/external-gateway/setup`. There are two causes. A directory on that path was unsafe: the home directory or one of its ancestors, `~/.local`, `~/.local/share`, `~/.local/share/teamarness`, `~/.local/share/teamarness/external-gateway` or `setup`, which must have mode exactly `0700`. Or a state file in `setup` is not valid. Until the Package is reloaded, every `setup.preview` except `install-cli` fails with this code. After you fix an unsafe directory, `setup.inspect` can report `recovery.state` `none`, but the refusal stays until the reload. When a state file is not valid, `setup.inspect` reports `recovery.state` `invalid`, and a reload fails the same way. | For an unsafe directory, fix the ownership and modes as for `output_unsafe`. Then reload the Package through the Host with `packages reload --package dev.teamarness.external-gateway`; see [Send requests through the Host](#send-requests-through-the-host). Then inspect and preview again. For a state file that is not valid, do not edit, move or delete it. Only `install-cli` remains available. Report the problem with the `setup.inspect` output. |
 | `external_gateway.home_unavailable` | The Backend could not resolve its OS user's home. The Backend does not activate. | See [Prerequisites](#prerequisites). |
-| `external_gateway.reload_required` | The Backend's admitted bytes changed. | Reload the Package through the Host, then preview again. The headless Host has not defined its reload command yet. |
+| `external_gateway.reload_required` | The Backend's admitted bytes changed. | Reload the Package through the Host with `packages reload --package dev.teamarness.external-gateway`, then preview again. |
 | `external_gateway.forbidden` | `tmx call` to a tool that is not selected. | Select the tool with `tool.set`. |
 | `external_gateway.unauthorized` | The credential was revoked or rotated elsewhere. | Inspect, then use `rotate` or `connect`. |
 | `cli.workspace_not_configured` | No local connection exists for that Workspace. | Connect the Workspace. |
@@ -265,21 +266,51 @@ The skill contains no credential. Rerun the command after a CLI update. See
 A setup failure that leaves `phase` `repair-required` in `setup.status` also
 shows a code in `error`. Inspect, then follow the repair table.
 
-## Host command wrapper (planned, unverified)
+## Send requests through the Host
 
-> **Planned, unverified.** The Teamarness Host has not released its headless
-> operator command. The grammar below comes from the Host's plan and can
-> change. Do not use it as a reference until the Host documents it.
+The headless Host's operator command lists, describes and sends Package
+requests. Every command names the Workspace and Package explicitly. Set `APP`
+to the Host executable and `DATA` to its data directory, as in the Host's
+headless operator guide:
 
-The planned Host interface lists, describes and sends Package requests. It
-requires an explicit Workspace and Package on every command:
-
-```text
-<host command> package operations --workspace <workspace-id> --package dev.teamarness.external-gateway
-<host command> package schema --workspace <workspace-id> --package dev.teamarness.external-gateway --operation external-gateway.setup.preview
-<host command> package request --workspace <workspace-id> --package dev.teamarness.external-gateway --operation external-gateway.setup.preview --contract-digest <digest> --input <file|->
+```sh
+"$APP" --data-dir "$DATA" package operations --workspace <workspace-id> --package dev.teamarness.external-gateway
+"$APP" --data-dir "$DATA" package schema --workspace <workspace-id> --package dev.teamarness.external-gateway --operation external-gateway.setup.preview
+"$APP" --data-dir "$DATA" package request --workspace <workspace-id> --package dev.teamarness.external-gateway --operation external-gateway.setup.preview --contract-digest <digest> --input -
+"$APP" --data-dir "$DATA" packages reload --package dev.teamarness.external-gateway
 ```
 
-Under that plan, each request body above goes in `--input`, as a private file or
-on stdin with `-`. `--contract-digest` carries the admitted contract digest as
-the Host reports it.
+Each request body in this guide goes on stdin with `--input -`, or in a private
+regular file with no group or other permission bits. `--contract-digest` is the
+admitted contract digest that `package operations` or `package schema` reports.
+Discover it again after every reload. `packages reload` applies to the whole
+Installation, so it reloads every Workspace's Instance of this Package.
+
+The Host's Linux install guide, `docs/headless/install-linux.md` in the
+Teamarness repository, gives a working sequence for each Workspace in
+"Workspace tier", step 8 "Configure the External Gateway". It defines a
+`tm_req` helper that looks up the digest for you.
+
+The Host reports any failure after it dispatches a request as uncertain and
+nonretryable, even when the Package's own error is certain. Read the original
+error in `details`, inspect the state with `setup.inspect` or `setup.status`,
+and do not replay the request.
+
+## More than one Workspace
+
+One registration of this Package runs one Instance in each Workspace that
+enables it. `tmx` is installed once for the OS user, and later Workspaces see
+it as `installed`. Everything else belongs to one Workspace:
+
+- the listener and its loopback port, which differ between Workspaces;
+- the tool selection, which starts empty in every Workspace; and
+- the connection and its managed credential.
+
+Repeat steps 3 to 5 in each Workspace. `tmx workspaces` lists each connected
+Workspace with its own port.
+
+Give external agents the Workspace ID, not the name, as `--workspace`. Names
+are last observed locally and can change or collide. Record IDs can also
+repeat across Workspaces: `#general` has the same ID in every Workspace. A
+call with the wrong `--workspace` therefore succeeds in the wrong Workspace
+without an error.
